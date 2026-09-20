@@ -68,28 +68,19 @@ mkdirSync(codexHome, { recursive: true });
 const portServer = Bun.listen({ hostname: "127.0.0.1", port: 0, socket: { data() {} } });
 const port = portServer.port;
 portServer.stop();
-const tunnel = {
-  binaryPath: runtimeExecutable,
-  tunnelId: "tunnel_0123456789abcdef0123456789abcdef",
-  runtimeKeyFile: join(appHome, "secrets", "tunnel-runtime-zero-risk.key"),
-  profileDir: join(appHome, "tunnel", "profiles"),
-  profileName: "codex-chatgpt-web-secure-zero-risk",
-  alias: "codex-chatgpt-web-secure-zero-risk",
-};
 const config: AppConfig = {
   version: 3,
   releaseVersion: VERSION,
-  mode: "full",
-  subagentProtocol: "compatibility-v1",
+  mode: "browser-only",
+  subagentProtocol: "native",
   host: "127.0.0.1",
   port,
   contextWindow: 256_000,
-  appName: ZERO_RISK_CHATGPT_CONNECTOR_NAME,
+  appName: CHATGPT_CONNECTOR_NAME,
   automaticAppName: CHATGPT_CONNECTOR_NAME,
   manualAppName: ZERO_RISK_CHATGPT_CONNECTOR_NAME,
-  browserHost: "launcher",
-  browserInteractionMode: "manual",
-  browserHostDescriptorPath: join(appHome, "runtime", "launcher-browser.json"),
+  browserHost: "managed-chrome",
+  browserInteractionMode: "automatic",
   chromeExecutablePath: "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
   storageStatePath: join(appHome, "browser", "storage-state.json"),
   brokerSocketPath: defaultBrokerEndpoint(appHome),
@@ -104,8 +95,6 @@ const config: AppConfig = {
   controlToken: "release-smoke-control-token-0123456789abcdef",
   runtimeCommand,
   acknowledgedUnofficialAt: new Date().toISOString(),
-  tunnel,
-  manualTunnel: tunnel,
 };
 writeFileSync(join(appHome, "config.json"), `${JSON.stringify(config, null, 2)}\n`, { mode: 0o600 });
 writeFileSync(config.storageStatePath, "{}\n", { mode: 0o600 });
@@ -125,7 +114,7 @@ try {
   }
   if (!health?.ok) throw new Error("relocated daemon did not become healthy");
   const payload = await health.json() as Record<string, unknown>;
-  if (payload.service !== "codex-chatgpt-web-secure" || payload.mode !== "full") {
+  if (payload.service !== "codex-chatgpt-web-secure" || payload.mode !== "browser-only") {
     throw new Error(`unexpected health payload: ${JSON.stringify(payload)}`);
   }
 
