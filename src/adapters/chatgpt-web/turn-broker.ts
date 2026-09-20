@@ -401,9 +401,15 @@ export class TurnBroker implements TurnBrokerOwner {
     const delivered = [...channel.deliveredCallIds]
       .map(id => channel.invocations.get(id)?.request)
       .filter((request): request is BrokerToolRequest => Boolean(request));
-    if (delivered.length > 0) return delivered;
+    if (delivered.length > 0) {
+      this.logToolDelivery(channel, delivered, "replay");
+      return delivered;
+    }
     const ready = this.takeQueued(channel);
-    if (ready.length > 0) return ready;
+    if (ready.length > 0) {
+      this.logToolDelivery(channel, ready, "immediate");
+      return ready;
+    }
     if (signal?.aborted) throw new DOMException("tool wait aborted", "AbortError");
     return new Promise<BrokerToolRequest[]>((resolveWait, rejectWait) => {
       const waiter: ToolWaiter = { resolve: resolveWait, reject: rejectWait, ...(signal ? { signal } : {}) };
@@ -566,6 +572,7 @@ export class TurnBroker implements TurnBrokerOwner {
     safe.state = "completed";
     safe.finalAnswer = finalAnswer;
     this.resolveSafeWaiters(safe.completionWaiters, finalAnswer);
+    console.info(`[chatgpt-web] broker trace=${channel.traceId} accepted safe completion`);
     return { completed: true, duplicate: false };
   }
 
@@ -1139,6 +1146,14 @@ export class TurnBroker implements TurnBrokerOwner {
     return ids.map(id => channel.invocations.get(id)?.request).filter((request): request is BrokerToolRequest => Boolean(request));
   }
 
+  private logToolDelivery(channel: TurnChannel, batch: BrokerToolRequest[], path: "immediate" | "waiter" | "replay"): void {
+    for (const request of batch) {
+      console.info(
+        `[chatgpt-web] broker trace=${channel.traceId} delivered call=${request.callId.slice(0, 17)} path=${path} replay=${path === "replay"}`,
+      );
+    }
+  }
+
   private scheduleToolWaiters(channel: TurnChannel): void {
     if (channel.queuedCallIds.length === 0 || channel.waiters.size === 0) return;
     if (channel.batchTimer) return;
@@ -1151,9 +1166,7 @@ export class TurnBroker implements TurnBrokerOwner {
   private wakeToolWaiters(channel: TurnChannel): void {
     if (channel.queuedCallIds.length === 0 || channel.waiters.size === 0) return;
     const batch = this.takeQueued(channel);
-    console.info(
-      `[chatgpt-web] broker trace=${channel.traceId} delivered calls=${batch.length} tools=${batch.map(request => request.wireName).join(",")}`,
-    );
+    this.logToolDelivery(channel, batch, "waiter");
     const waiters = [...channel.waiters];
     channel.waiters.clear();
     const first = waiters.shift();

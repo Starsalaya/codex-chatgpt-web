@@ -149,8 +149,29 @@ function locateCodexInterruptHook(text: string, installed: InstalledCodexInterru
   const stateOffset = stateHeader.index + stateHeader[0].length - stateHeader[1].length;
   // The native TOML writer can insert unrelated tables between the hook and its trust state.
   // Locate the two owned definitions separately, retaining exact command/field matching.
-  const ranges = [ownedPrefix.slice(0, stateOffset), ownedPrefix.slice(stateOffset)].map(fragment => {
-    const pattern = new RegExp(hookTextPattern(fragment), "g");
+  // It also rewrites Windows trust keys as literal strings. Decode only candidate headers;
+  // the complete document and the exact owned fields are still checked below.
+  const stateHeaders = [...text.matchAll(/^\[hooks\.state\.[^\r\n]+\]/gm)]
+    .map(match => match[0])
+    .filter(header => {
+      try {
+        const parsed = Bun.TOML.parse(header) as { hooks: { state: Record<string, unknown> } };
+        const keys = Object.keys(parsed.hooks.state);
+        return keys.length === 1 && keys[0] === installed.stateKey;
+      } catch {
+        return false;
+      }
+    });
+  const patterns = [
+    hookTextPattern(ownedPrefix.slice(0, stateOffset)),
+    `(?:${stateHeaders.map(hookTextPattern).join("|")})`
+      + hookTextPattern(ownedPrefix.slice(stateOffset + stateHeader[1].length)),
+  ];
+  if (stateHeaders.length === 0) {
+    throw new Error("Codex interrupt lifecycle hook changed after setup; refusing to overwrite it");
+  }
+  const ranges = patterns.map(source => {
+    const pattern = new RegExp(source, "g");
     const match = pattern.exec(text);
     if (!match || pattern.exec(text)) {
       throw new Error("Codex interrupt lifecycle hook changed after setup; refusing to overwrite it");

@@ -7,6 +7,7 @@ import {
   extractChatGptTurnEnvironment,
   extractChatGptCompactionSourceRevision,
   extractChatGptContinuationEnvironmentClaim,
+  extractChatGptSteeringEnvironmentClaim,
   extractChatGptTurnIdentity,
   extractChatGptThreadSpawnLineage,
   extractChatGptRootThreadMetadata,
@@ -159,8 +160,10 @@ export class ChatGptThreadEnvironmentStore {
       const currentCompaction = hasCurrentContext && isChatGptCompactionContinuation(parsed);
       const historicalMessages = hasCurrentContext && !currentCompaction && lineage
         ? unattributedChatGptEnvironmentMessages(parsed) : undefined;
-      if (hasCurrentContext && !currentCompaction && !historicalMessages) throw error;
-      const currentClaim = currentCompaction ? extractChatGptContinuationEnvironmentClaim(parsed) : undefined;
+      const steeringClaim = hasCurrentContext && !currentCompaction
+        ? extractChatGptSteeringEnvironmentClaim(parsed) : undefined;
+      if (hasCurrentContext && !currentCompaction && !historicalMessages && !steeringClaim) throw error;
+      const currentClaim = currentCompaction ? extractChatGptContinuationEnvironmentClaim(parsed) : steeringClaim;
       const rolloutIdentity = lineage ?? extractChatGptRootThreadMetadata(parsed);
       // Automatic compaction has a current turn_context; standalone compaction has only its
       // source turn_context. Either must be the latest native record, never an arbitrary ancestor.
@@ -178,7 +181,7 @@ export class ChatGptThreadEnvironmentStore {
         });
         if (rolloutEnvironment) {
           if (currentClaim && !sameAuthority(currentClaim, rolloutEnvironment)) {
-            throw new Error("Compaction continuation environment conflicts with its current Codex rollout");
+            throw new Error(`${currentCompaction ? "Compaction continuation" : "Steering"} environment conflicts with its current Codex rollout`);
           }
           this.set(rolloutIdentity.threadId, rolloutEnvironment);
           return rolloutEnvironment;

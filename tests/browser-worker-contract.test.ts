@@ -1,10 +1,11 @@
 import { expect, test } from "bun:test";
 import { mkdtempSync, readFileSync, readdirSync, rmSync } from "node:fs";
+import { EventEmitter } from "node:events";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createContext, runInContext } from "node:vm";
 import type { Page } from "playwright-core";
-import { CHATGPT_BROWSER_OBSERVATION_PROBE_TIMEOUT_MS, CHATGPT_COMPLETION_SETTLE_MS, CHATGPT_EXTERNAL_PROGRESS_CLOCK_SKEW_MS, CHATGPT_EXTERNAL_PROGRESS_STALL_CEILING_MS, ChatGptCompletionTracker, chatGptExternalProgressSuppressesDomHealth, CHATGPT_RESPONSE_DOM_GRACE_MS, MAX_CHATGPT_INTERNAL_OBSERVATION_FAULTS, CHATGPT_COMPOSER_DOCUMENT_END_KEY, CHATGPT_COMPOSER_SELECT_ALL_KEY, ChatGptBrowserObservationTimeoutError, ChatGptBrowserWorker, ChatGptPromptAttachmentIntegrityError, ChatGptTurnDomHealthTracker, ChatGptVisibleTraceTracker, MAX_CHATGPT_BROWSER_PAGE_REBINDS, MAX_CHATGPT_BROWSER_TABS, MAX_CHATGPT_CONNECTOR_TRIGGER_ATTEMPTS, assertChatGptWebInputWithinLimits, assertChatGptWebMultipartInputWithinLimits, browserDiagnosticCheckpoint, chatGptConnectorAttachmentMode, chatGptNewTurnIdentity, chatGptReboundTurnIdentity, chatGptSubmissionEvidence, connectAfterClosingBrowserConnection, dismissChatGptTemporaryChatOnboarding, isChatGptTraceControl, redactChatGptUiDiagnostic, resolveBrowserConfig, resolveChatGptToolConfirmation, resolveChatGptWebMultipartStagingMode, sanitizeChatGptBrowserDiagnosticState, setChatGptThinkMode, stripChatGptTraceControlSuffix, throwIfChatGptRateLimitDialog, throwIfChatGptSessionFailureAlert, throwIfChatGptTerminalErrorAlert, withChatGptBrowserObservationTimeout, CHATGPT_MULTIPART_RESPONSE_DOM_GRACE_MS, browserStageTimeouts, ChatGptSuspensionClock, remainingStageBudgetMs } from "../src/adapters/chatgpt-web/browser-worker";
+import { CHATGPT_BROWSER_OBSERVATION_PROBE_TIMEOUT_MS, CHATGPT_COMPLETION_SETTLE_MS, CHATGPT_EXTERNAL_PROGRESS_CLOCK_SKEW_MS, CHATGPT_EXTERNAL_PROGRESS_STALL_CEILING_MS, ChatGptCompletionTracker, chatGptExternalProgressSuppressesDomHealth, CHATGPT_RESPONSE_DOM_GRACE_MS, MAX_CHATGPT_INTERNAL_OBSERVATION_FAULTS, CHATGPT_COMPOSER_DOCUMENT_END_KEY, CHATGPT_COMPOSER_SELECT_ALL_KEY, ChatGptBrowserObservationTimeoutError, ChatGptBrowserWorker, ChatGptSubmissionRejectionObserver, ChatGptPromptAttachmentIntegrityError, ChatGptTurnDomHealthTracker, ChatGptVisibleTraceTracker, MAX_CHATGPT_BROWSER_PAGE_REBINDS, MAX_CHATGPT_BROWSER_TABS, MAX_CHATGPT_CONNECTOR_TRIGGER_ATTEMPTS, assertChatGptWebInputWithinLimits, assertChatGptWebMultipartInputWithinLimits, browserDiagnosticCheckpoint, chatGptConnectorAttachmentMode, chatGptNewTurnIdentity, chatGptReboundTurnIdentity, chatGptSubmissionEvidence, connectAfterClosingBrowserConnection, dismissChatGptTemporaryChatOnboarding, isChatGptTraceControl, redactChatGptUiDiagnostic, resolveBrowserConfig, resolveChatGptToolConfirmation, resolveChatGptWebMultipartStagingMode, sanitizeChatGptBrowserDiagnosticState, setChatGptThinkMode, stripChatGptTraceControlSuffix, throwIfChatGptRateLimitDialog, throwIfChatGptSessionFailureAlert, throwIfChatGptTerminalErrorAlert, withChatGptBrowserObservationTimeout, CHATGPT_MULTIPART_RESPONSE_DOM_GRACE_MS, browserStageTimeouts, ChatGptSuspensionClock, remainingStageBudgetMs } from "../src/adapters/chatgpt-web/browser-worker";
 import { ensureChatGptPersonalizedConnectorAccess, chatGptUnavailableProDetail } from "../src/adapters/chatgpt-web/browser-worker";
 import { chatGptStoppedThinkingError } from "../src/adapters/chatgpt-web/adapter-error";
 import { CHATGPT_STOPPED_THINKING_LABELS } from "../src/adapters/chatgpt-web/ui-labels";
@@ -2510,15 +2511,18 @@ function dialogPage(text: string, buttonText = "Got it", errorActionVisible = fa
   };
 }
 
-test("the known ChatGPT rate-limit dialog is acknowledged and returns a structured 429", async () => {
-  const fixture = dialogPage("Too many requests. You're making requests too quickly.");
+test.each([
+  ["Too many requests. You're making requests too quickly.", "Got it"],
+  ["요청을 너무 빠르게 보내고 있습니다. 잠시 후 다시 시도해 주세요.", "알겠습니다"],
+])("rate-limit dialog stops automatic resubmission: %s", async (message, button) => {
+  const fixture = dialogPage(message, button);
 
   await expect(throwIfChatGptRateLimitDialog(fixture.page)).rejects.toMatchObject({
     name: "ChatGptWebAdapterError",
     status: 429,
     errorType: "rate_limit_error",
     code: "rate_limit_exceeded",
-    retryable: true,
+    retryable: false,
     message: "ChatGPT rate limit: too many requests. Try again in a few minutes.",
   });
   expect(fixture.pressed).toEqual(["Enter"]);
@@ -2539,7 +2543,7 @@ test("submission acceptance reports a rate-limit dialog that appears after Enter
     status: 429,
     errorType: "rate_limit_error",
     code: "rate_limit_exceeded",
-    retryable: true,
+    retryable: false,
   });
   expect(fixture.pressed).toEqual(["Enter"]);
 });
@@ -2552,7 +2556,7 @@ test("the Traditional Chinese ChatGPT rate-limit dialog is acknowledged and retu
     status: 429,
     errorType: "rate_limit_error",
     code: "rate_limit_exceeded",
-    retryable: true,
+    retryable: false,
   });
   expect(fixture.pressed).toEqual(["Enter"]);
 });
@@ -2565,7 +2569,7 @@ test("the Simplified Chinese ChatGPT rate-limit dialog is acknowledged and retur
     status: 429,
     errorType: "rate_limit_error",
     code: "rate_limit_exceeded",
-    retryable: true,
+    retryable: false,
   });
   expect(fixture.pressed).toEqual(["Enter"]);
 });
@@ -2581,7 +2585,7 @@ test("the Japanese ChatGPT rate-limit dialog is acknowledged and returns a struc
     status: 429,
     errorType: "rate_limit_error",
     code: "rate_limit_exceeded",
-    retryable: true,
+    retryable: false,
   });
   expect(fixture.pressed).toEqual(["Enter"]);
 });
@@ -2606,6 +2610,66 @@ test("the known terminal ChatGPT error alert returns a structured retryable fail
     retryable: true,
   });
   expect(fixture.pressed).toEqual([]);
+});
+
+test("only a size rejection of the current owned browser submission is non-retryable", async () => {
+  const frame = {};
+  const page = Object.assign(new EventEmitter(), { mainFrame: () => frame });
+  const observer = new ChatGptSubmissionRejectionObserver();
+  const makeRequest = (url = "https://chatgpt.com/backend-api/f/conversation", owner = frame) => ({
+    method: () => "POST", url: () => url, frame: () => owner,
+  });
+  let bodyReads = 0;
+  const respond = (request: ReturnType<typeof makeRequest>, code = "message_length_exceeds_limit", status = 413) => {
+    page.emit("response", {
+      request: () => request, status: () => status, headers: () => ({ "content-type": "application/json" }),
+      json: async () => { bodyReads += 1; return { detail: { code } }; },
+    });
+  };
+  const old = makeRequest();
+  page.emit("request", old);
+  observer.begin(page as unknown as Page);
+  respond(old);
+  for (const request of [makeRequest("https://other.example/backend-api/f/conversation"),
+    makeRequest("https://chatgpt.com/backend-api/sentinel"), makeRequest(undefined, {})]) {
+    page.emit("request", request); respond(request);
+  }
+  expect(bodyReads).toBe(0);
+  const successful = makeRequest(); page.emit("request", successful); respond(successful, "message_length_exceeds_limit", 200);
+  const unfamiliar = makeRequest(); page.emit("request", unfamiliar); respond(unfamiliar, "unknown_error");
+  expect(await observer.failure()).toBeUndefined();
+  const current = makeRequest(); page.emit("request", current); respond(current);
+  expect(await observer.failure()).toMatchObject({
+    status: 400, code: "context_length_exceeded", errorType: "invalid_request_error", retryable: false,
+  });
+  observer.begin(page as unknown as Page);
+  expect(await observer.failure()).toBeUndefined();
+  respond(current);
+  expect(await observer.failure()).toBeUndefined();
+  observer.dispose();
+  expect(page.listenerCount("request")).toBe(0);
+  expect(page.listenerCount("response")).toBe(0);
+});
+
+test("effort readback rejects a changed selection or surface before activating Send", async () => {
+  const selection = { url: "https://chatgpt.com/?temporary-chat=true", label: "Alto" };
+  const state = { url: selection.url, label: "Alto", expanded: "false", editable: true, count: 1 };
+  const control = { innerText: async () => state.label, getAttribute: async () => state.expanded };
+  const controls = { filter() { return this; }, count: async () => state.count, first: () => control };
+  const composer = { locator: () => ({ locator: () => controls }), isEditable: async () => state.editable };
+  const worker = Object.assign(Object.create(ChatGptBrowserWorker.prototype), { activeComposer: async () => composer }) as {
+    assertSelectedEffort(page: unknown, mode: unknown): Promise<void>;
+  };
+  const page = { url: () => state.url };
+  const mode = { selection };
+  await worker.assertSelectedEffort(page, mode);
+  for (const change of [{ label: "Medio" }, { url: "https://chatgpt.com/" }, { expanded: "true" },
+    { editable: false }, { count: 2 }]) {
+    Object.assign(state, { url: selection.url, label: "Alto", expanded: "false", editable: true, count: 1 }, change);
+    await expect(worker.assertSelectedEffort(page, mode)).rejects.toMatchObject({
+      code: "upstream_server_error", retryable: false,
+    });
+  }
 });
 
 test("the current response error action identifies short and localized failures without clicking Retry", async () => {
@@ -3019,7 +3083,7 @@ test("browser preflight separates model context from one-message transport limit
     "gpt-5.6-sol",
     "medium",
     pro,
-    515_000,
+    500_000,
   )).not.toThrow();
   expect(() => assertChatGptWebInputWithinLimits(
     111_193,
@@ -3027,7 +3091,7 @@ test("browser preflight separates model context from one-message transport limit
     "gpt-5.6-sol",
     "medium",
     pro,
-    515_001,
+    500_000,
   )).toThrow("103,000-token ChatGPT browser message boundary");
   expect(() => assertChatGptWebInputWithinLimits(
     112_192,
@@ -3045,6 +3109,15 @@ test("browser preflight separates model context from one-message transport limit
     pro,
     520_001,
   )).toThrow("104,000-token ChatGPT browser message boundary");
+  // Live reasoning-mode HTTP 413 failures occur even below the token budget.
+  for (const effort of ["medium", "high", "xhigh"] as const) {
+    expect(() => assertChatGptWebInputWithinLimits(
+      75_000 + 8_192, 75_000, "gpt-5.6-sol", effort, pro, 500_000,
+    )).not.toThrow();
+    expect(() => assertChatGptWebInputWithinLimits(
+      75_000 + 8_192, 75_000, "gpt-5.6-sol", effort, pro, 520_000,
+    )).toThrow("500,000-character ChatGPT composer boundary");
+  }
 });
 
 test("Bigger Context fits mixed-density whole records within both token and composer limits", () => {
@@ -3067,7 +3140,7 @@ test("Bigger Context fits mixed-density whole records within both token and comp
         systemPrompt: [],
         messages: contents.map((content, index) => ({ role: "user", content, timestamp: index + 1 })),
       },
-    }, capabilities, undefined, { experimentalMultipartParts: 3 });
+    }, capabilities, undefined, { experimentalMultipartParts: 6 });
     const multipart = compiled.multipart!;
     const records = multipart.parts.flatMap(part => JSON.parse(part).records);
     expect(records).toEqual(contents.map((content, message_index) => ({
@@ -3077,7 +3150,7 @@ test("Bigger Context fits mixed-density whole records within both token and comp
 
     const transaction = "ctx_0123456789abcdef0123456789abcdef";
     const stages = multipart.parts.slice(0, -1).map((payload, index) => (
-      formatChatGptWebMultipartStage(payload, transaction, index + 1, 3).text
+      formatChatGptWebMultipartStage(payload, transaction, index + 1, 6).text
     ));
     const final = formatChatGptWebMultipartCommit(multipart, transaction);
     const maxStageMessageTokens = Math.max(...stages.map(text => estimateTokens(text)));
@@ -3090,11 +3163,11 @@ test("Bigger Context fits mixed-density whole records within both token and comp
       estimateCompiledChatGptWebInputTokens(compiled, CHATGPT_WEB_MODEL_ID),
       Math.max(maxStageMessageTokens, finalMessageTokens),
       CHATGPT_WEB_MODEL_ID, "high", capabilities,
-      Math.max(maxStageChars, final.length), 3,
+      Math.max(maxStageChars, final.length), 6,
       { stagingEffort: stagingMode.effort, maxStageMessageTokens, maxStageChars, finalMessageTokens, finalMessageChars: final.length },
     )).not.toThrow();
   }
-}, 30_000);
+}, 90_000);
 
 test("Bigger Context preflight expands only the total context ceiling and keeps each message boundary", () => {
   const plus = {
@@ -3115,8 +3188,8 @@ test("Bigger Context preflight expands only the total context ceiling and keeps 
     "gpt-5.6-sol",
     "high",
     pro,
-    900_000,
-    3,
+    500_000,
+    6,
   )).not.toThrow();
   expect(() => assertChatGptWebMultipartInputWithinLimits(
     333_579,
@@ -3124,16 +3197,16 @@ test("Bigger Context preflight expands only the total context ceiling and keeps 
     "gpt-5.6-sol",
     "high",
     pro,
-    900_000,
-    3,
-  )).toThrow("three-part ceiling");
+    500_000,
+    6,
+  )).toThrow("six-part ceiling");
   expect(() => assertChatGptWebMultipartInputWithinLimits(
     222_385,
     95_000,
     "gpt-5.6-sol",
     "high",
     pro,
-    900_000,
+    500_000,
     2,
   )).not.toThrow();
   expect(() => assertChatGptWebMultipartInputWithinLimits(
@@ -3142,7 +3215,7 @@ test("Bigger Context preflight expands only the total context ceiling and keeps 
     "gpt-5.6-sol",
     "high",
     pro,
-    900_000,
+    500_000,
     2,
   )).toThrow("two-part ceiling");
   expect(() => assertChatGptWebMultipartInputWithinLimits(
@@ -3152,7 +3225,7 @@ test("Bigger Context preflight expands only the total context ceiling and keeps 
     "high",
     plus,
     900_000,
-    3,
+    6,
   )).not.toThrow();
   expect(() => assertChatGptWebMultipartInputWithinLimits(
     270_000,
@@ -3161,8 +3234,8 @@ test("Bigger Context preflight expands only the total context ceiling and keeps 
     "high",
     plus,
     900_000,
-    3,
-  )).toThrow("270,000-token three-part ceiling");
+    6,
+  )).toThrow("270,000-token six-part ceiling");
   expect(() => assertChatGptWebMultipartInputWithinLimits(
     180_000,
     80_000,
@@ -3178,8 +3251,8 @@ test("Bigger Context preflight expands only the total context ceiling and keeps 
     "gpt-5.6-sol",
     "high",
     pro,
-    900_000,
-    3,
+    500_000,
+    6,
   )).toThrow("ChatGPT message boundary");
   expect(() => assertChatGptWebMultipartInputWithinLimits(
     20_000,
@@ -3205,7 +3278,7 @@ test("Bigger Context stages use the lowest account mode that can carry the stage
     const inline = () => assertChatGptWebInputWithinLimits(tokens + 8_192, tokens, "gpt-5.6-sol", "high", plus, 300_000);
     const stage = () => resolveChatGptWebMultipartStagingMode("gpt-5.6-sol", plus, tokens, 300_000);
     const final = () => assertChatGptWebMultipartInputWithinLimits(
-      tokens + 10_000, tokens, "gpt-5.6-sol", "high", plus, 300_000, 3,
+      tokens + 10_000, tokens, "gpt-5.6-sol", "high", plus, 300_000, 6,
       { stagingEffort: "medium", maxStageMessageTokens: 500, maxStageChars: 2_000, finalMessageTokens: tokens, finalMessageChars: 300_000 },
     );
     for (const preflight of [inline, stage, final]) {
@@ -3220,7 +3293,7 @@ test("Bigger Context stages use the lowest account mode that can carry the stage
     300_000,
   )).toThrow("No ChatGPT effort");
   expect(resolveChatGptWebMultipartStagingMode("gpt-5.6-sol", pro, 100_000, 500_000).effort).toBe("low");
-  expect(resolveChatGptWebMultipartStagingMode("gpt-5.6-sol", pro, 100_000, 600_000).effort).toBe("medium");
+  expect(resolveChatGptWebMultipartStagingMode("gpt-5.6-sol", pro, 100_000, 600_000).effort).toBe("max");
   expect(resolveChatGptWebMultipartStagingMode("gpt-5.6-sol", pro, 104_000, 1_200_000).effort).toBe("max");
   expect(() => resolveChatGptWebMultipartStagingMode(
     "gpt-5.6-luna",
@@ -3235,7 +3308,7 @@ test("Bigger Context stages use the lowest account mode that can carry the stage
     "low",
     plus,
     300_000,
-    3,
+    6,
     {
       stagingEffort: "medium",
       maxStageMessageTokens: 30_000,

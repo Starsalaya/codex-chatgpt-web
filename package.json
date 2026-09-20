@@ -41,6 +41,7 @@
     "smoke:interrupt": "bun run scripts/smoke-codex-interrupt.ts",
     "smoke:subagents": "bun run scripts/smoke-codex-subagents.ts --v1 && bun run scripts/smoke-codex-subagents.ts --v2",
     "smoke:subagents:live": "bun run scripts/smoke-codex-web-subagents.ts",
+    "smoke:environment": "bun run scripts/smoke-codex-environment.ts",
     "launcher": "bun run scripts/start-launcher.ts",
     "app": "bun run scripts/start-launcher.ts",
     "app:package": "bun run --cwd launcher package",

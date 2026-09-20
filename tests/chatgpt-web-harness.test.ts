@@ -1,4 +1,4 @@
-import { afterAll, describe, expect, test } from "bun:test";
+import { afterAll, describe, expect, spyOn, test } from "bun:test";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import { createHash } from "node:crypto";
@@ -1230,7 +1230,7 @@ describe("ChatGPT outer-native harness v4", () => {
     }
   });
 
-  test("caps automatic rate-limit browser sends at three retries for one native turn", async () => {
+  test("caps automatic transient-server-error browser sends at three retries for one native turn", async () => {
     const socketPath = brokerTestEndpoint(`cgw-h4-retry-budget-${process.pid}-${Date.now()}`);
     const provider: CodexProviderConfig = {
       adapter: "chatgpt-web",
@@ -1243,10 +1243,10 @@ describe("ChatGPT outer-native harness v4", () => {
     (worker as unknown as { run: (turn: BrowserTurn) => Promise<string> }).run = async turn => {
       browserStarts += 1;
       turn.onSendActivated?.();
-      throw new ChatGptWebAdapterError("ChatGPT rate limit: too many requests. Try again in a few minutes.", {
-        status: 429,
-        errorType: "rate_limit_error",
-        code: "rate_limit_exceeded",
+      throw new ChatGptWebAdapterError("ChatGPT is temporarily unavailable. Try again in a few minutes.", {
+        status: 502,
+        errorType: "server_error",
+        code: "upstream_server_error",
         retryable: true,
       });
     };
@@ -1259,7 +1259,7 @@ describe("ChatGPT outer-native harness v4", () => {
           event => events.push(event),
         );
         const error = events.at(-1);
-        expect(error).toMatchObject({ type: "error", code: "rate_limit_exceeded" });
+        expect(error).toMatchObject({ type: "error", code: "upstream_server_error" });
         expect((error as Extract<AdapterEvent, { type: "error" }>).retryable)
           .toBe(attempt < MAX_CHATGPT_WEB_TURN_RETRIES);
         if (attempt === MAX_CHATGPT_WEB_TURN_RETRIES) {
@@ -1309,11 +1309,14 @@ describe("ChatGPT outer-native harness v4", () => {
     }
   });
 
-  test("a non-retryable browser failure remains replayable without starting another browser turn", async () => {
+  test.each([
+    { status: 400, errorType: "invalid_request_error", code: "context_length_exceeded" },
+    { status: 429, errorType: "rate_limit_error", code: "rate_limit_exceeded" },
+  ])("a terminal $code failure remains replayable without starting another browser turn", async failure => {
     const socketPath = brokerTestEndpoint(`cgw-h4-nonretryable-${process.pid}-${Date.now()}`);
     const provider: CodexProviderConfig = {
       adapter: "chatgpt-web",
-      baseUrl: "browser://chatgpt-nonretryable-test",
+      baseUrl: `browser://chatgpt-nonretryable-test-${failure.code}`,
       chatgptWeb: { brokerSocketPath: socketPath, localToolsEnabled: false, solAvailable: true, extraHighAvailable: true, proAvailable: true },
     };
     const worker = ChatGptBrowserWorker.forProvider(provider);
@@ -1321,15 +1324,13 @@ describe("ChatGPT outer-native harness v4", () => {
     let browserStarts = 0;
     (worker as unknown as { run: (turn: BrowserTurn) => Promise<string> }).run = async () => {
       browserStarts += 1;
-      throw new ChatGptWebAdapterError("This task exceeds the model context window.", {
-        status: 400,
-        errorType: "invalid_request_error",
-        code: "context_length_exceeded",
+      throw new ChatGptWebAdapterError("Request cannot be automatically retried.", {
+        ...failure,
         retryable: false,
       });
     };
     try {
-      for (let attempt = 0; attempt < 2; attempt += 1) {
+      for (let attempt = 0; attempt < 6; attempt += 1) {
         const events: AdapterEvent[] = [];
         await createChatGptWebAdapter(provider).runTurn!(
           rawWireRequest(environmentXml),
@@ -1338,7 +1339,7 @@ describe("ChatGPT outer-native harness v4", () => {
         );
         expect(events.at(-1)).toMatchObject({
           type: "error",
-          code: "context_length_exceeded",
+          ...failure,
           retryable: false,
         });
       }
@@ -1601,7 +1602,7 @@ describe("ChatGPT outer-native harness v4", () => {
       status: 429,
       errorType: "rate_limit_error",
       code: "rate_limit_exceeded",
-      retryable: true,
+      retryable: false,
     }], CHATGPT_WEB_MODEL_ID) as {
       status: string;
       retryable: boolean;
@@ -1609,7 +1610,7 @@ describe("ChatGPT outer-native harness v4", () => {
     };
     expect(rateLimit).toMatchObject({
       status: "failed",
-      retryable: true,
+      retryable: false,
       error: { type: "rate_limit_error", code: "rate_limit_exceeded" },
     });
 
@@ -2122,23 +2123,45 @@ describe("ChatGPT outer-native harness v4", () => {
   test("batches parallel ChatGPT MCP calls into one native Responses round", async () => {
     const socketPath = brokerTestEndpoint(`cgw-h3-parallel-${process.pid}-${Date.now()}`);
     const broker = TurnBroker.forSocket(socketPath);
-    const token = await broker.register(extractChatGptTurnEnvironment(parsed(environmentXml)), 10_000);
-    const claimed = await callTurnBroker<{ bindingId: string }>(socketPath, { method: "claim", token });
-    const invoke = (cmd: string) => callTurnBroker<BrokerToolResult>(socketPath, {
-      method: "invoke",
-      bindingId: claimed.bindingId,
-      wireName: "exec_command",
-      freeform: false,
-      arguments: { cmd },
-    }, 10_000);
-    const first = invoke("pwd");
-    const second = invoke("git status --short");
-    const batch = await broker.nextToolBatch(token);
-    expect(batch.map(request => request.arguments?.cmd).sort()).toEqual(["git status --short", "pwd"]);
-    expect(await broker.nextToolBatch(token)).toEqual(batch);
-    for (const request of batch) broker.completeTool(token, request.callId, toolResult({ output: request.arguments?.cmd }));
-    await Promise.all([first, second]);
-    await broker.close();
+    const logs: string[] = [];
+    let queuedCalls = 0;
+    let resolveQueued!: () => void;
+    const queued = new Promise<void>(resolve => { resolveQueued = resolve; });
+    const logger = spyOn(console, "info").mockImplementation((...args) => {
+      const line = args.join(" ");
+      logs.push(line);
+      if (line.includes("broker trace=parallel-delivery queued call=") && ++queuedCalls === 2) resolveQueued();
+    });
+    try {
+      const token = await broker.register(extractChatGptTurnEnvironment(parsed(environmentXml)), 10_000, "parallel-delivery");
+      const claimed = await callTurnBroker<{ bindingId: string }>(socketPath, { method: "claim", token });
+      const invoke = (cmd: string) => callTurnBroker<BrokerToolResult>(socketPath, {
+        method: "invoke",
+        bindingId: claimed.bindingId,
+        wireName: "exec_command",
+        freeform: false,
+        arguments: { cmd },
+      }, 10_000);
+      const first = invoke("pwd");
+      const second = invoke("git status --short");
+      await queued;
+      const batch = await broker.nextToolBatch(token);
+      expect(batch.map(request => request.arguments?.cmd).sort()).toEqual(["git status --short", "pwd"]);
+      expect(await broker.nextToolBatch(token)).toEqual(batch);
+      for (const request of batch) broker.completeTool(token, request.callId, toolResult({ output: request.arguments?.cmd }));
+      await Promise.all([first, second]);
+      expect(logs.filter(line => line.includes(" delivered "))).toEqual(
+        ["immediate", "replay"].flatMap(path => batch.map(request => (
+          `[chatgpt-web] broker trace=parallel-delivery delivered call=${request.callId.slice(0, 17)} path=${path} replay=${path === "replay"}`
+        ))),
+      );
+      for (const privateValue of [token, claimed.bindingId, ...batch.map(request => request.callId), "git status --short"]) {
+        expect(logs.join("\n")).not.toContain(privateValue);
+      }
+    } finally {
+      logger.mockRestore();
+      await broker.close();
+    }
   });
 
   test("revoking a turn rejects pending invocations and invalidates its binding", async () => {
@@ -2580,6 +2603,10 @@ describe("ChatGPT outer-native harness v4", () => {
     const gatewayOnlyEnvironment = extractChatGptTurnEnvironment(parsed(environmentXml));
     gatewayOnlyEnvironment.tools = [
       { name: "exec", description: "Run nested Codex tools, including exec_command", parameters: {}, freeform: true },
+      {
+        name: "tool_search", description: "Load deferred tools", toolSearch: true,
+        parameters: { type: "object", properties: { query: { type: "string" } }, required: ["query"] },
+      },
       { name: "wait", description: "Wait for an exec cell", parameters: { type: "object" } },
       { name: "request_user_input", description: "Request user input", parameters: { type: "object" } },
       {
@@ -2780,7 +2807,19 @@ describe("ChatGPT outer-native harness v4", () => {
         tools: [],
         total: 0,
         next_offset: null,
+        discovery_tools: [{
+          wire_name: "tool_search", name: "tool_search", namespace: null,
+          description: "Load deferred tools", kind: "tool_search",
+        }],
       });
+
+      const search = call("codex_tool_call", {
+        turn_token: token, wire_name: "tool_search", arguments: { query: "clink opencode pal" },
+      });
+      const [searchRequest] = await broker.nextToolBatch(token);
+      expect(searchRequest).toMatchObject({ wireName: "tool_search", arguments: { query: "clink opencode pal" } });
+      broker.completeTool(token, searchRequest!.callId, toolResult({ tools: [] }));
+      await search;
 
       const rawGatewayInventory = await inventoryThroughGateway(
         "Run nested Codex tools",
@@ -2797,6 +2836,7 @@ describe("ChatGPT outer-native harness v4", () => {
         total: 1,
         next_offset: null,
       });
+      expect(rawGatewayInventory.structuredContent).not.toHaveProperty("discovery_tools");
 
       const rawWeb = call("codex_tool_call", {
         turn_token: token,

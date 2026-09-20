@@ -211,8 +211,9 @@ test("a transient effort control does not turn a Luna-only account into Sol", as
   expect(visibilityReads).toBe(2);
 });
 
-function reasoningPicker(options: { max?: string; delay?: number; missing?: boolean } = {}) {
+function reasoningPicker(options: { max?: string; delay?: number; missing?: boolean; loseSelectionOnClose?: boolean } = {}) {
   let value = 0;
+  let opened = true;
   const keys: string[] = [];
   const hidden = {
     filter() { return this; }, last() { return this; }, getByText() { return this; },
@@ -240,20 +241,27 @@ function reasoningPicker(options: { max?: string; delay?: number; missing?: bool
     },
   };
   const control = {
-    last() { return this; }, waitFor: async () => {}, isVisible: async () => true,
-    getAttribute: async (name: string) => name === "aria-expanded" ? "true" : null,
+    first() { return this; }, filter() { return this; }, last() { return this; },
+    count: async () => 1, waitFor: async () => {}, isVisible: async () => true,
+    click: async () => { opened = true; },
+    innerText: async () => opened ? "Thinking effort" : ["Instant", "Medium", "High", "Extra High", "Pro"][value]!,
+    getAttribute: async (name: string) => name === "aria-expanded" ? String(opened) : null,
   };
-  const composer = { filter() { return this; }, last() { return this; }, locator: () => ({ locator: () => control }) };
+  const composer = { filter() { return this; }, last() { return this; }, isEditable: async () => true, locator: () => ({ locator: () => control }) };
   const modelRows = { count: async () => 3, first() { return this; }, waitFor: async () => {}, nth: () => { throw new Error("Model rows are not effort choices"); } };
   const menu = { filter() { return this; }, last() { return this; }, isVisible: async () => true, locator: () => modelRows };
   const page = {
+    url: () => "https://chatgpt.com/?temporary-chat=true",
     locator: (selector: string) => {
       if (selector === CHATGPT_COMPOSER_SELECTOR) return composer;
       if (selector === CHATGPT_EFFORT_MENU_SELECTOR) return menu;
       if (selector === CHATGPT_EFFORT_SLIDER_CONTAINER_SELECTOR) return container;
       return hidden;
     },
-    keyboard: { press: async () => {} },
+    keyboard: { press: async () => {
+      opened = false;
+      if (options.loseSelectionOnClose) value = 0;
+    } },
   };
   return { page, composer, keys, value: () => value };
 }
@@ -278,12 +286,18 @@ test("the four-step browser range keeps Extra High available when Pro is unavail
     .resolves.toEqual({ solAvailable: true, extraHighAvailable: true, proAvailable: false });
 });
 
-test("Pro selection changes the hidden slider through its visible owner, never through model rows", async () => {
-  const fixture = reasoningPicker({ delay: 50 });
-  const select = (ChatGptBrowserWorker.prototype as unknown as {
-    selectModelAndEffort(...args: unknown[]): Promise<unknown>;
-  }).selectModelAndEffort;
-  await select.call({ activeComposer: async () => fixture.composer }, fixture.page, "gpt-5.6-sol", "max", { localToolsEnabled: false, solAvailable: true, extraHighAvailable: true, proAvailable: true });
-  expect(fixture.keys).toEqual(["ArrowRight", "ArrowRight", "ArrowRight", "ArrowRight"]);
-  expect(fixture.value()).toBe(4);
+test("Pro selection verifies the persisted hidden slider through its visible owner, never model rows", async () => {
+  for (const loseSelectionOnClose of [false, true]) {
+    const fixture = reasoningPicker({ delay: 50, loseSelectionOnClose });
+    const worker = Object.assign(Object.create(ChatGptBrowserWorker.prototype), {
+      activeComposer: async () => fixture.composer,
+    }) as { selectModelAndEffort(...args: unknown[]): Promise<{ selection: { label: string } }> };
+    const selection = worker.selectModelAndEffort(fixture.page, "gpt-5.6-sol", "max", {
+      localToolsEnabled: false, solAvailable: true, extraHighAvailable: true, proAvailable: true,
+    });
+    if (loseSelectionOnClose) await expect(selection).rejects.toMatchObject({ retryable: false });
+    else expect((await selection).selection.label).toBe("Pro");
+    expect(fixture.keys).toEqual(["ArrowRight", "ArrowRight", "ArrowRight", "ArrowRight"]);
+    expect(fixture.value()).toBe(loseSelectionOnClose ? 0 : 4);
+  }
 });

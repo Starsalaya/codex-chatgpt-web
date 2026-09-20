@@ -1094,12 +1094,15 @@ export function createChatGptWebAdapter(
               }
               const handoffError = error instanceof Error ? error : new Error(String(error));
               console.error("[chatgpt-web] structured context handoff failed:", handoffError);
+              const upstreamError = handoffError instanceof ChatGptWebAdapterError ? handoffError : undefined;
               emit({
                 type: "error",
-                message: "ChatGPT did not complete the context handoff. Retry the task.",
-                status: 409,
-                errorType: "invalid_request_error",
-                code: "compaction_handoff_failed",
+                message: upstreamError?.message ?? "ChatGPT did not complete the context handoff. Retry the task.",
+                status: upstreamError?.status ?? 409,
+                errorType: upstreamError?.errorType ?? "invalid_request_error",
+                code: upstreamError?.code ?? "compaction_handoff_failed",
+                // Compaction retry remains an explicit operator decision even when its source
+                // failure was retryable; preserve the cause without opening a new retry loop.
                 retryable: false,
               });
               return;

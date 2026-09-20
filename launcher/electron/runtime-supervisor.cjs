@@ -561,6 +561,8 @@ class RuntimeSupervisor {
     if (!fs.existsSync(tunnel.runtimeKeyFile)) {
       throw new Error(`Tunnel runtime key is missing: ${tunnel.runtimeKeyFile}`);
     }
+    // First-time setup commits only configuration; all native manager commands run here.
+    fs.mkdirSync(tunnel.profileDir, { recursive: true, mode: 0o700 });
   }
 
   async proxyHealthPayload(config, timeoutMs = 2_000) {

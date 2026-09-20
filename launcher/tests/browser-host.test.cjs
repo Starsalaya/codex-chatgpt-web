@@ -2810,12 +2810,19 @@ test("manual confirmation deadlines end at Sent so slow model startup can still 
 
 test("manual completion is idempotent and cannot be downgraded after a lost acknowledgement", () => {
   const { fixture } = manualTurnFixture();
+  const logs = [];
+  fixture.logger.info = (event, detail) => logs.push([event, detail]);
   const retained = fixture.beginManualTurn(
     "manual_completed_retained",
     process.pid,
     "private prompt",
     "a".repeat(64),
   );
+  assert.throws(
+    () => fixture.endManualTurn("manual_completed_retained", process.pid, "completed", true),
+    /cannot complete before Sent confirmation/,
+  );
+  assert.equal(logs.some(([event]) => event === "browser.manual_turn_completed"), false);
   fixture.confirmManualSent(retained.tabId);
   fixture.markManualTurnStarted("manual_completed_retained", process.pid);
   assert.deepEqual(
@@ -2842,6 +2849,16 @@ test("manual completion is idempotent and cannot be downgraded after a lost ackn
     fixture.endManualTurn("manual_completed_released", process.pid, "failed", false),
     { cancelledByUser: false },
   );
+  assert.deepEqual(logs.filter(([event]) => event === "browser.manual_turn_completed"), [
+    ["browser.manual_turn_completed", {
+      tabId: retained.tabId, traceId: "manual_completed_retained", status: "completed", retained: true,
+    }],
+    ["browser.manual_turn_completed", {
+      tabId: released.tabId, traceId: "manual_completed_released", status: "completed", retained: false,
+    }],
+  ]);
+  assert.equal(JSON.stringify(logs).includes("private prompt"), false);
+  assert.equal(JSON.stringify(logs).includes("a".repeat(64)), false);
 });
 
 test("terminal Zero Risk tabs are reclaimed before retained conversations", () => {

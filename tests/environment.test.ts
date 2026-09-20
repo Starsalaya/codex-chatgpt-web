@@ -6,6 +6,7 @@ import { dirname, join, resolve, toNamespacedPath } from "node:path";
 import { extractChatGptTurnEnvironment, extractChatGptTurnIdentity } from "../src/adapters/chatgpt-web/environment";
 import { rememberCompactionContinuation } from "../src/adapters/chatgpt-web/compaction-continuation";
 import { encodeCompactionSummary, SUMMARY_PREFIX } from "../src/responses/compaction";
+import { parseRequest } from "../src/responses/parser";
 import { ChatGptThreadEnvironmentStore } from "../src/adapters/chatgpt-web/thread-environment";
 import type { CodexParsedRequest, CodexTool } from "../src/types";
 
@@ -819,6 +820,107 @@ describe("trusted Codex task environment continuity", () => {
       cwd: root, roots: [root], writableRoots: [root], sandboxPolicy: { type: "dangerFullAccess" },
       tools: request.context.tools,
     });
+  });
+
+  function steeredRolloutFixture(child: boolean, workspaceRoots: string[]) {
+    const fixture = resumedRootFixture();
+    const { request, rolloutPath } = fixture;
+    const auxiliary = resolve(root, "..", "native-auxiliary-workspace");
+    const xml = environmentXml.replace(`<root>${root}</root>`, `<root>${root}</root><root>${auxiliary}</root>`);
+    const body = request._rawBody as { input: Array<Record<string, unknown>>; client_metadata: Record<string, string> };
+    const metadata = JSON.parse(body.client_metadata["x-codex-turn-metadata"]!);
+    metadata.workspaces = Object.fromEntries(workspaceRoots.map(path => [path, {}]));
+    if (child) Object.assign(metadata, {
+      parent_thread_id: rolloutParentId, agent_name: rolloutAgent, subagent_kind: "thread_spawn",
+    });
+    body.client_metadata["x-codex-turn-metadata"] = JSON.stringify(metadata);
+    const original = structuredClone(body.input[0]!);
+    original.id = "msg_original_instruction";
+    body.input[0]!.content = [{ type: "input_text", text: "Finish the bounded investigation now." }];
+    const environment = {
+      type: "message", role: "user", id: "msg_native_preamble",
+      internal_chat_message_metadata_passthrough: { turn_id: rolloutTurnId },
+      content: [
+        { type: "input_text", text: "<recommended_plugins>example</recommended_plugins>" },
+        { type: "input_text", text: xml },
+      ],
+    };
+    body.input.unshift(environment, original, {
+      type: "message", role: "assistant", id: "msg_finished", phase: "final_answer",
+      content: [{ type: "output_text", text: "The first instruction is complete." }],
+      internal_chat_message_metadata_passthrough: { turn_id: rolloutTurnId },
+    });
+    const session = child ? childSessionMeta()
+      : { type: "session_meta", payload: { id: rolloutThreadId, source: "vscode" } };
+    writeFileSync(rolloutPath, [session, childTurnContext(rolloutTurnId, { workspace_roots: [root, auxiliary] })]
+      .map(value => JSON.stringify(value)).join("\n") + "\n");
+    return { ...fixture, request: parseRequest({ ...body, model: "chatgpt-web/pro" }), body, environment, auxiliary };
+  }
+
+  test("same-turn steering resolves V1 children without an assigned agent path", () => {
+    const { codexHome, request, body, rolloutPath, auxiliary } = steeredRolloutFixture(true, []);
+    const metadata = JSON.parse(body.client_metadata["x-codex-turn-metadata"]!);
+    metadata.agent_name = "/root";
+    body.client_metadata["x-codex-turn-metadata"] = JSON.stringify(metadata);
+    const native = readFileSync(rolloutPath, "utf8").replaceAll(JSON.stringify(rolloutAgent), "null");
+    writeFileSync(rolloutPath, native);
+    expect(new ChatGptThreadEnvironmentStore(undefined, Date.now, codexHome).resolve(request).roots)
+      .toEqual([root, auxiliary]);
+  });
+
+  for (const child of [false, true]) for (const gitRoots of [[], [root]]) {
+    test(`same-turn steering authenticates ${child ? "child" : "root"} auxiliary roots against the current rollout with ${gitRoots.length} Git roots`, () => {
+      const { codexHome, request, body, auxiliary } = steeredRolloutFixture(child, gitRoots);
+      const beforeSteering = { ...request, _rawBody: { ...body, input: body.input.slice(0, -1) } };
+      expect(extractChatGptTurnEnvironment(beforeSteering).roots).toEqual([root, auxiliary]);
+      expect(() => extractChatGptTurnEnvironment(request)).toThrow("missing cwd");
+      request.context.tools = [{ name: "current_only", description: "d", parameters: { type: "object" } }];
+      expect(new ChatGptThreadEnvironmentStore(undefined, Date.now, codexHome).resolve(request)).toEqual({
+        cwd: root, roots: [root, auxiliary], writableRoots: [root, auxiliary],
+        sandboxPolicy: { type: "dangerFullAccess" }, tools: request.context.tools,
+      });
+    });
+  }
+
+  test("steering never replaces missing or contradictory rollout proof with cached authority", () => {
+    const { codexHome, request, body, rolloutPath, environment, auxiliary } = steeredRolloutFixture(false, []);
+    const store = new ChatGptThreadEnvironmentStore(undefined, Date.now, codexHome);
+    store.resolve({ ...request, _rawBody: { ...body, input: body.input.slice(0, -1) } });
+    const native = readFileSync(rolloutPath, "utf8");
+    rmSync(rolloutPath);
+    expect(() => store.resolve(request)).toThrow("missing cwd");
+    writeFileSync(rolloutPath, native);
+    const original = environment.content[1]!.text;
+    for (const claim of [
+      original.replaceAll(auxiliary, resolve(root, "..", "unproven-root")),
+      original.replace(dangerFullAccessProfileXml, "<sandbox_mode>read-only</sandbox_mode>"),
+      original.replace(`<cwd>${root}</cwd>`, "<cwd/>"),
+    ]) {
+      environment.content[1]!.text = claim;
+      expect(() => store.resolve(request)).toThrow();
+    }
+    environment.content[1]!.text = original;
+    writeFileSync(rolloutPath, native.replaceAll(rolloutTurnId, rolloutParentId));
+    expect(() => store.resolve(request)).toThrow("current turn");
+  });
+
+  test("steering proof requires one attributed envelope and two current native instructions", () => {
+    const { codexHome, request, body, environment } = steeredRolloutFixture(false, []);
+    const store = new ChatGptThreadEnvironmentStore(undefined, Date.now, codexHome);
+    for (const index of [1, 3]) {
+      const item = body.input[index]!;
+      const metadata = item.internal_chat_message_metadata_passthrough;
+      item.internal_chat_message_metadata_passthrough = { turn_id: rolloutParentId };
+      expect(() => store.resolve(request)).toThrow();
+      item.internal_chat_message_metadata_passthrough = metadata;
+    }
+    body.input.push({ ...environment, id: "msg_new_invalid_update", content: [
+      { type: "input_text", text: "<environment_context><cwd/></environment_context>" },
+    ] });
+    expect(() => store.resolve(request)).toThrow();
+    body.input.pop();
+    body.input[0] = { ...environment, id: undefined };
+    expect(() => store.resolve(request)).toThrow();
   });
 
   test.skipIf(process.platform !== "win32")("resumed Windows tasks accept the same indexed rollout with either path namespace", () => {

@@ -187,3 +187,33 @@ test("keeps foreign TOML tables inserted between the managed hook and its trust 
     }
   }
 });
+
+test("accepts a literal-quoted trust-state key while preserving another config path's trust entry", () => {
+  const original = 'model = "example"\n';
+  const installed = installCodexInterruptHook(original, "/Users/test/.codex/config.toml", { runtimeCommand: ["/opt/runtime"] });
+  // Use the Windows key from #443 without depending on this test host's path resolver.
+  const stateKey = String.raw`D:\AppData\Codex\UserData\config.toml:interrupt:0:0`;
+  const beforeHeader = `[hooks.state.${JSON.stringify(installed.installed.stateKey)}]`;
+  const journalHeader = `[hooks.state.${JSON.stringify(stateKey)}]`;
+  const journal = {
+    ...installed.installed,
+    stateKey,
+    fragment: installed.installed.fragment.replace(beforeHeader, journalHeader),
+  };
+  const alias = `[hooks.state.'C:\\Users\\test\\.codex\\config.toml:interrupt:0:0']\ntrusted_hash = ${JSON.stringify(journal.trustedHash)}\n`;
+  for (const ending of ["\n", "\r\n"]) {
+    const edited = installed.text.replace(beforeHeader, `[hooks.state.'${stateKey}']`)
+      .replace(MANAGED_INTERRUPT_HOOK_END, alias + MANAGED_INTERRUPT_HOOK_END)
+      .replaceAll("\n", ending);
+    verifyCodexInterruptHook(edited, journal);
+    expect(restoreCodexInterruptHook(edited, journal)).toBe((original + alias).replaceAll("\n", ending));
+    for (const changed of [
+      edited.replace("timeout = 3", "timeout = 2"),
+      edited.replace(journal.trustedHash, "sha256:changed"),
+      edited.replace(`[hooks.state.'${stateKey}']`, "[hooks.state.'different-key']"),
+      edited + `\n[hooks.state.'${stateKey}'.extra]\nchanged = true\n`,
+    ]) {
+      expect(() => verifyCodexInterruptHook(changed, journal)).toThrow("changed after setup");
+    }
+  }
+});

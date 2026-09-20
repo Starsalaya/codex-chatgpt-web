@@ -137,7 +137,9 @@ Bigger Context partitions complete ordered records against each message's availa
 composer budgets. Inert stages carry text; the final message also carries all retained attachments,
 the execution contract and any output schema. Their reserves are deducted before partitioning,
 then preflight checks the actual compiled messages and total transaction. The selected execution
-effort, attachment references and three-part maximum remain unchanged.
+effort and attachment references remain unchanged. Large transactions use up to six messages;
+the advertised context and compaction thresholds remain three times the base limits. More parts
+reduce message size, not the amount of history retained.
 
 In Full mode, routed compaction v1/v2 uses the exact retained source agent and a one-shot MCP control
 capability that accepts only the bound checkpoint; it cannot claim or invoke the ordinary Codex tool

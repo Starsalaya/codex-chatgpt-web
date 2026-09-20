@@ -191,7 +191,7 @@ describe("fixed ChatGPT Web model routes", () => {
     for (const effort of ["medium", "high", "xhigh"] as const) {
       expect(resolveChatGptWebTransportLimits(CHATGPT_WEB_BACKEND_MODEL, effort, pro)).toEqual({
         browserMessageTokenLimit: 103_000,
-        browserComposerCharLimit: 1_045_000,
+        browserComposerCharLimit: 500_000,
       });
     }
     expect(resolveChatGptWebTransportLimits(CHATGPT_WEB_BACKEND_MODEL, "max", pro)).toEqual({

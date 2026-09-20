@@ -882,6 +882,30 @@ test("a failed setup preflight leaves the previous runtime running and untouched
   }
 });
 
+test("setup preflight keeps the requested setup budget before stopping the current runtime", async () => {
+  const events = [];
+  const host = new RuntimeHost({
+    app: { getPath: () => os.tmpdir() },
+    logger: { info() {}, warn() {}, error() {} },
+    sourceRoot: "/source",
+    browserDescriptorPath: "/runtime/launcher-browser.json",
+    supervisor: {
+      readSetupConfig: () => null,
+      readConfig: () => null,
+      stopForSetup: async () => { events.push("stop"); },
+      startIfConfigured: async () => { events.push("start"); return { status: "ready" }; },
+    },
+  });
+  host.captureSetupCheckpoint = () => [];
+  host.run = async (_name, args, options) => {
+    events.push(args.includes("--preflight-only") ? "preflight" : "setup");
+    assert.equal(options.timeoutMs, 300_000);
+    return { code: 0, stdout: "", stderr: "" };
+  };
+  await host.runSetup("core-setup", ["setup", "--full"], { timeoutMs: 300_000 });
+  assert.deepEqual(events, ["preflight", "stop", "setup", "start"]);
+});
+
 test("a browser-mode commit failure restores the previous runtime inside setup", async () => {
   const previousConfig = {
     mode: "full",

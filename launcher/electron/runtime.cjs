@@ -1376,7 +1376,7 @@ class RuntimeHost {
           ...options,
           message: "Validating Codex configuration before changing the runtime",
           successMessage: "Codex configuration is ready for setup",
-          timeoutMs: Math.min(options.timeoutMs || 15_000, 15_000),
+          timeoutMs: options.timeoutMs || CORE_SETUP_TIMEOUT_MS,
         });
       }
       runtimeTransitionStarted = true;

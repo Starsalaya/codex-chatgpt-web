@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { chmodSync, existsSync, mkdirSync, readdirSync, rmSync, statSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { skillFileTokens, validateSkillFiles } from "./skill-attachments";
-import { chromium, type Browser, type BrowserContext, type Locator, type Page } from "playwright-core";
+import { chromium, type Browser, type BrowserContext, type Locator, type Page, type Request, type Response } from "playwright-core";
 import {
   atomicWriteFile,
   CHATGPT_CONNECTOR_NAME,
@@ -40,6 +40,7 @@ import {
   CHATGPT_MAX_INPUT_IMAGES,
   formatChatGptWebMultipartCommit,
   formatChatGptWebMultipartStage,
+  isChatGptWebMultipartPartCount,
   type CompiledChatGptWebPrompt,
   type ChatGptWebPromptImage,
   type ChatGptWebMultipartStage,
@@ -71,6 +72,7 @@ import {
   notifyLauncherTurn,
 } from "../../launcher-browser-host";
 import {
+  CHATGPT_WEB_BIGGER_CONTEXT_MULTIPLIER,
   resolveChatGptWebContextLimits,
   resolveChatGptWebMessageTokenBudget,
   resolveChatGptWebTransportLimits,
@@ -730,28 +732,30 @@ export class ChatGptPromptAttachmentIntegrityError extends ChatGptWebAdapterErro
 }
 
 const chatGptRateLimitDialog = (page: Page): Locator => page.locator('[role="dialog"]')
-  .filter({ hasText: /Too many requests|太多要求|太多请求|リクエストが多すぎます/i })
-  .filter({ hasText: /making requests too quickly|過於頻繁|过于频繁|リクエストの頻度が高すぎます/i })
+  .filter({ hasText: /Too many requests|太多要求|太多请求|リクエストが多すぎます|요청이 너무 많습니다|요청을 너무 빠르게|너무 많은 요청/i })
+  .filter({ hasText: /making requests too quickly|過於頻繁|过于频繁|リクエストの頻度が高すぎます|요청을 너무 빠르게|요청이 너무 많습니다|너무 많은 요청/i })
   .last();
 
 export async function throwIfChatGptRateLimitDialog(page: Page): Promise<void> {
   const dialog = chatGptRateLimitDialog(page);
   if (!await dialog.isVisible().catch(() => false)) return;
 
-  const acknowledge = dialog.getByRole("button", { name: /^(Got it|知道了|了解)$/ }).last();
+  const acknowledge = dialog.getByRole("button", { name: /^(Got it|知道了|了解|알겠습니다|확인)$/ }).last();
   if (await acknowledge.isVisible().catch(() => false)) {
     try {
       await acknowledge.press("Enter");
     } catch (error) {
       throw new ChatGptWebAdapterError(
         `ChatGPT rate limit: too many requests, and the dialog could not be dismissed (${error instanceof Error ? error.message : String(error)}). Try again in a few minutes.`,
-        { status: 429, errorType: "rate_limit_error", code: "rate_limit_exceeded", retryable: true },
+        { status: 429, errorType: "rate_limit_error", code: "rate_limit_exceeded", retryable: false },
       );
     }
   }
+  // Dismissing the modal does not prove the account cooldown has cleared. Keep this failure
+  // replayable in the adapter so native reconnects cannot start more browser submissions.
   throw new ChatGptWebAdapterError(
     "ChatGPT rate limit: too many requests. Try again in a few minutes.",
-    { status: 429, errorType: "rate_limit_error", code: "rate_limit_exceeded", retryable: true },
+    { status: 429, errorType: "rate_limit_error", code: "rate_limit_exceeded", retryable: false },
   );
 }
 
@@ -803,6 +807,59 @@ export async function throwIfChatGptSessionFailureAlert(page: Page): Promise<voi
 const chatGptTerminalErrorAlert = (scope: ChatGptTextScope): Locator => scope
   .getByText(/Something went wrong[\s\S]*help\.openai\.com/i)
   .last();
+
+// The current UI renders message_length_exceeds_limit as an ordinary response error.
+// Observe only browser-issued submissions from this owned page after Send is activated;
+// an old response, another tab, or a background endpoint cannot classify this turn.
+export class ChatGptSubmissionRejectionObserver {
+  private page?: Page;
+  private readonly requests = new Set<Request>();
+  private checks: Array<Promise<ChatGptWebAdapterError | undefined>> = [];
+
+  private readonly onRequest = (request: Request): void => {
+    if (!this.page || request.method() !== "POST"
+      || request.url() !== "https://chatgpt.com/backend-api/f/conversation"
+      || request.frame() !== this.page.mainFrame()) return;
+    this.requests.add(request);
+  };
+
+  private readonly onResponse = (response: Response): void => {
+    if (!this.requests.delete(response.request()) || response.status() !== 413
+      || !response.headers()["content-type"]?.includes("application/json")) return;
+    this.checks.push(withChatGptBrowserObservationTimeout(response.json(), 3_000)
+      .then(body => body?.detail?.code === "message_length_exceeds_limit"
+        ? new ChatGptWebAdapterError(
+          "ChatGPT rejected this message because it exceeds the selected mode's input-size limit. Compact the task before retrying.",
+          { status: 400, errorType: "invalid_request_error", code: "context_length_exceeded", retryable: false },
+        ) : undefined)
+      // Unreadable or unfamiliar responses do not establish a size rejection. The normal
+      // bound-response DOM error remains authoritative in that case.
+      .catch(() => undefined));
+  };
+
+  begin(page: Page): void {
+    this.dispose();
+    this.checks = [];
+    this.page = page;
+    page.on("request", this.onRequest);
+    page.on("response", this.onResponse);
+  }
+
+  async failure(): Promise<ChatGptWebAdapterError | undefined> {
+    return (await Promise.all(this.checks)).find(error => error !== undefined);
+  }
+
+  dispose(): void {
+    this.page?.off("request", this.onRequest);
+    this.page?.off("response", this.onResponse);
+    this.page = undefined;
+    this.requests.clear();
+  }
+}
+
+type SelectedChatGptWebModelMode = ChatGptWebModelMode & {
+  selection?: { url: string; label: string };
+};
 
 export async function throwIfChatGptTerminalErrorAlert(scope: ChatGptTextScope): Promise<void> {
   if (await scope.getByTestId("regenerate-thread-error-button").last().isVisible().catch(() => false)) {
@@ -915,7 +972,7 @@ export function assertChatGptWebMultipartInputWithinLimits(
   effort: ChatGptWebModelMode["effort"],
   capabilities: ChatGptWebCapabilities,
   maxMessageChars: number,
-  partCount: 2 | 3,
+  partCount: number,
   transport?: {
     stagingEffort: ChatGptWebModelMode["effort"];
     maxStageMessageTokens: number;
@@ -925,6 +982,9 @@ export function assertChatGptWebMultipartInputWithinLimits(
     finalImageTokens?: number;
   },
 ): void {
+  if (!isChatGptWebMultipartPartCount(partCount)) {
+    throw new Error("Bigger Context requires two or six context parts");
+  }
   if (modelId === CHATGPT_WEB_LUNA_MODEL_ID) {
     throw new ChatGptWebAdapterError(
       "Bigger Context is unavailable for Luna because every later browser request includes the accumulated transcript inside the same 28,000-token transport budget.",
@@ -988,9 +1048,10 @@ export function assertChatGptWebMultipartInputWithinLimits(
   } else {
     assertMessageBoundary("stage", estimatedMessageTokens, maxMessageChars, effort);
   }
-  const experimentalContextWindow = baseContextWindow * partCount;
+  // More transport messages do not enlarge the model's advertised context window.
+  const experimentalContextWindow = baseContextWindow * Math.min(partCount, CHATGPT_WEB_BIGGER_CONTEXT_MULTIPLIER);
   if (estimatedInputTokens < experimentalContextWindow) return;
-  const partLabel = partCount === 2 ? "two-part" : "three-part";
+  const partLabel = partCount === 2 ? "two-part" : "six-part";
   throw new ChatGptWebAdapterError(
     `This Bigger Context transaction is estimated at ${estimatedInputTokens.toLocaleString("en-US")} input tokens, which exceeds its experimental ${experimentalContextWindow.toLocaleString("en-US")}-token ${partLabel} ceiling. Run /compact, then retry.`,
     { status: 400, errorType: "invalid_request_error", code: "context_length_exceeded", retryable: false },
@@ -2376,7 +2437,7 @@ export class ChatGptBrowserWorker {
     reasoning: string | undefined,
     capabilities: ChatGptWebCapabilities,
     captureDiagnostic?: (checkpoint: string) => Promise<void>,
-  ): Promise<ChatGptWebModelMode> {
+  ): Promise<SelectedChatGptWebModelMode> {
     const mode = resolveChatGptWebModelMode(modelId, reasoning, capabilities);
     const composer = await this.activeComposer(page);
     const composerForm = composer.locator("xpath=ancestor::form[1]");
@@ -2445,6 +2506,7 @@ export class ChatGptBrowserWorker {
     } finally {
       waitAbort.abort();
     }
+    const selectionUrl = page.url();
     let sliderState = parseChatGptEffortSliderState(
       await effortSlider.getAttribute("aria-valuemin"),
       await effortSlider.getAttribute("aria-valuemax"),
@@ -2497,9 +2559,60 @@ export class ChatGptBrowserWorker {
         );
       }
     }
+    await settleChatGptUi();
+    const selectedState = parseChatGptEffortSliderState(
+      await effortSlider.getAttribute("aria-valuemin"),
+      await effortSlider.getAttribute("aria-valuemax"),
+      await effortSlider.getAttribute("aria-valuenow"),
+    );
+    if (!selectedState || selectedState.min !== sliderState.min
+      || selectedState.max !== sliderState.max || selectedState.value !== targetValue) {
+      throw chatGptModelControlUnavailableAdapterError("ChatGPT changed its effort range or selection before the menu closed");
+    }
     await captureDiagnostic?.("effort-selected");
     await page.keyboard.press("Escape");
-    return mode;
+    await settleChatGptUi();
+    // While open, the trigger reads "Thinking effort", not the selected value. Read its
+    // closed label and reopen the menu once to prove the selection survived the commit.
+    const selectedMode: SelectedChatGptWebModelMode = {
+      ...mode,
+      selection: { url: selectionUrl, label: (await currentEffort.innerText()).trim() },
+    };
+    await this.assertSelectedEffort(page, selectedMode);
+    const confirmation = await activateChatGptEffortMenu(page, currentEffort);
+    await confirmation.slider.waitFor({ state: "attached", timeout: 5_000 });
+    const confirmedState = parseChatGptEffortSliderState(
+      await confirmation.slider.getAttribute("aria-valuemin"),
+      await confirmation.slider.getAttribute("aria-valuemax"),
+      await confirmation.slider.getAttribute("aria-valuenow"),
+    );
+    if (!confirmedState || confirmedState.min !== selectedState.min
+      || confirmedState.max !== selectedState.max || confirmedState.value !== targetValue) {
+      throw chatGptModelControlUnavailableAdapterError("ChatGPT did not persist the requested effort after closing its menu");
+    }
+    await page.keyboard.press("Escape");
+    await settleChatGptUi();
+    await this.assertSelectedEffort(page, selectedMode);
+    await captureDiagnostic?.("effort-selection-confirmed");
+    return selectedMode;
+  }
+
+  private async assertSelectedEffort(page: Page, mode: SelectedChatGptWebModelMode): Promise<void> {
+    if (!mode.selection) return;
+    const composer = await this.activeComposer(page);
+    const controls = composer.locator("xpath=ancestor::form[1]")
+      .locator(CHATGPT_EFFORT_CONTROL_SELECTOR).filter({ visible: true });
+    if (page.url() !== mode.selection.url || !mode.selection.label || await controls.count() !== 1) {
+      throw chatGptModelControlUnavailableAdapterError("ChatGPT changed the selected model's browser surface before submission");
+    }
+    const control = controls.first();
+    if ((await control.innerText()).trim() !== mode.selection.label
+      || await control.getAttribute("aria-expanded") !== "false"
+      || !await composer.isEditable()) {
+      throw chatGptModelControlUnavailableAdapterError(
+        "ChatGPT did not retain the selected effort in its ready composer; the message was not submitted",
+      );
+    }
   }
 
   private async activeComposer(
@@ -4384,6 +4497,7 @@ export class ChatGptBrowserWorker {
     let turnConnection: Browser | undefined;
     let managedPage: Page | undefined;
     let diagnosticPage: Page | undefined;
+    const submissionRejection = new ChatGptSubmissionRejectionObserver();
     try {
       if (turn.abortSignal?.aborted) throw new DOMException("ChatGPT web turn aborted", "AbortError");
       // Validate only the selected physical message, not canonical history used for usage estimates.
@@ -4646,7 +4760,10 @@ export class ChatGptBrowserWorker {
               checkpoint => diagnostics.capture(page, `multipart-${index + 1}-${checkpoint}`),
               turn.abortSignal ? AbortSignal.any([stageSignal, turn.abortSignal]) : stageSignal,
               undefined,
-              undefined,
+              { onSendActivated: async () => {
+                await this.assertSelectedEffort(page, mode);
+                submissionRejection.begin(page);
+              } },
               undefined,
               launcherObservationRecovery
                 ? async (...args) => {
@@ -4698,6 +4815,8 @@ export class ChatGptBrowserWorker {
             },
             chatGptSuspensionClock,
           );
+          const stageRejection = await submissionRejection.failure();
+          if (stageRejection) throw stageRejection;
           await diagnostics.capture(page, `multipart-stage-${index + 1}-acknowledged`);
           await turn.onMultipartStageAcknowledged?.(index + 1);
         }
@@ -4795,7 +4914,11 @@ export class ChatGptBrowserWorker {
           checkpoint => diagnostics.capture(page, checkpoint),
           turn.abortSignal ? AbortSignal.any([stageSignal, turn.abortSignal]) : stageSignal,
           turn.externalProgress,
-          turn,
+          { ...turn, onSendActivated: async () => {
+            await this.assertSelectedEffort(page, mode);
+            submissionRejection.begin(page);
+            await turn.onSendActivated?.();
+          } },
           completionTracker,
           launcherObservationRecovery
             ? async (...args) => {
@@ -5103,6 +5226,8 @@ export class ChatGptBrowserWorker {
        }
       }
 
+      const finalRejection = await submissionRejection.failure();
+      if (finalRejection) throw finalRejection;
       if (this.context && this.config.browserHost === "managed-chrome") {
         const state = await this.context.storageState();
         atomicWriteFile(this.config.storageStatePath, `${JSON.stringify(state)}\n`);
@@ -5114,6 +5239,10 @@ export class ChatGptBrowserWorker {
       );
       return finalText;
     } catch (error) {
+      if (!(error instanceof DOMException && error.name === "AbortError")
+        && !(error instanceof ChatGptWebAdapterError && error.code === "client_cancelled")) {
+        error = await submissionRejection.failure() ?? error;
+      }
       if (error instanceof DOMException && error.name === "AbortError"
         && turn.abortSignal?.reason instanceof ChatGptCompactionHandoffAccepted) {
         console.info(`[chatgpt-web] browser turn ${turn.traceId} ended after accepted structured compaction handoff`);
@@ -5131,6 +5260,7 @@ export class ChatGptBrowserWorker {
       }
       throw error;
     } finally {
+      submissionRejection.dispose();
       prepared.release();
       if (turnConnection) {
         await turnConnection.close().catch(error => {

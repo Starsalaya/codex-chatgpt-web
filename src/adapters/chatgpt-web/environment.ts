@@ -308,6 +308,45 @@ export function extractChatGptContinuationEnvironmentClaim(parsed: CodexParsedRe
   return parseChatGptEnvironmentText(parsed, updates[0]!);
 }
 
+/**
+ * Steering can separate the original environment/instruction pair from the active instruction.
+ * Git workspace metadata need not list every native filesystem root. Return that earlier claim
+ * only for a same-turn pair; the store must compare it with the current canonical rollout.
+ */
+export function extractChatGptSteeringEnvironmentClaim(parsed: CodexParsedRequest): ChatGptTurnEnvironment | undefined {
+  const turnId = extractChatGptTurnIdentity(parsed).turnId;
+  if (!turnId) return undefined;
+  const body = record(parsed._rawBody);
+  const input = Array.isArray(body?.input) ? body.input : [];
+  const metadata = clientTurnMetadata(parsed);
+  const activeIndex = input.findLastIndex(value => isUserOrParentInstruction(record(value), metadata));
+  const active = record(input[activeIndex]);
+  if (itemTurnId(active) !== turnId || typeof active?.id !== "string" || !active.id) return undefined;
+
+  // Do not skip an unrecognized update or use one of several competing envelopes. Older,
+  // explicitly attributed history is not a current claim; untagged XML remains unproven.
+  const claims = input.flatMap((value, index) => {
+    const item = record(value);
+    if (item?.type !== "message" || !/<\/?environment_context\b/i.test(rawMessageText(item))) return [];
+    const owner = itemTurnId(item);
+    return owner === undefined || owner === turnId ? [{ item, index }] : [];
+  });
+  if (claims.length !== 1) return undefined;
+  const claim = claims[0]!;
+  if (claim.item.role !== "user" || itemTurnId(claim.item) !== turnId
+    || typeof claim.item.id !== "string" || !claim.item.id) return undefined;
+  const parts = Array.isArray(claim.item.content) ? claim.item.content : [];
+  if (parts.filter(part => /<\/?environment_context\b/i.test(String(record(part)?.text ?? ""))).length !== 1) return undefined;
+
+  for (let index = claim.index + 1; index < activeIndex; index += 1) {
+    const instruction = record(input[index]);
+    if (typeof instruction?.id !== "string" || !instruction.id) continue;
+    const text = environmentBeforeUser(input, index, turnId, metadata);
+    if (text) return parseChatGptEnvironmentText(parsed, text);
+  }
+  return undefined;
+}
+
 function environmentBeforeUser(input: unknown[], userIndex: number, expectedTurnId?: string, metadata?: Record<string, unknown>): string | undefined {
   if (userIndex <= 0) return undefined;
   const user = record(input[userIndex]);

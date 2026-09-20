@@ -24,9 +24,10 @@ test("daemon streams browser lifecycle through the real helper process", async (
       await turn.onPreparedSelected(false);
       const prepared = await turn.prepare();
       if (prepared.skillFiles?.[0]?.text !== "<skill>\\n<name>ipc</name>\\n<path>/skills/ipc/SKILL.md</path>\\ncheck IPC\\n</skill>") throw new Error("Skill file lost in IPC");
-      if (prepared.multipart.parts.length !== 3) throw new Error("Multipart context was lost");
-      await turn.onMultipartStageAcknowledged?.(1);
-      await turn.onMultipartStageAcknowledged?.(2);
+      if (prepared.multipart.parts.length !== 6) throw new Error("Multipart context was lost");
+      for (let index = 1; index < prepared.multipart.parts.length; index++) {
+        await turn.onMultipartStageAcknowledged?.(index);
+      }
       await turn.onSendActivated();
       turn.onSubmitted();
       turn.onReasoningSummary("Reading project");
@@ -97,7 +98,7 @@ test("daemon streams browser lifecycle through the real helper process", async (
         skillFiles: [selectedSkillFile({ role: "user", origin: "codex_skill", timestamp: 0,
           content: "<skill>\n<name>ipc</name>\n<path>/skills/ipc/SKILL.md</path>\ncheck IPC\n</skill>",
         })],
-        multipart: { parts: ["part one", "part two", "part three"], commit: "inspect" },
+        multipart: { parts: ["part one", "part two", "part three", "part four", "part five", "part six"], commit: "inspect" },
         release: () => { released = true; },
       }),
       onMultipartStageAcknowledged: stage => { acknowledgedStages.push(stage); },
@@ -116,7 +117,7 @@ test("daemon streams browser lifecycle through the real helper process", async (
     expect(deltas).toEqual(["done"]);
     expect(sendActivated).toBe(true);
     expect(submitted).toBe(true);
-    expect(acknowledgedStages).toEqual([1, 2]);
+    expect(acknowledgedStages).toEqual([1, 2, 3, 4, 5]);
     expect(checkpoints).toEqual([{
       answerHash: "a".repeat(64),
       checkpoint: {
@@ -277,7 +278,7 @@ test("launcher helper protocol preserves multipart context and the compaction fl
     prepare: async () => ({
       text: "commit",
       images: [],
-      multipart: { parts: ["{\"part\":1}", "{\"part\":2}", "{\"part\":3}"], commit: "commit" },
+      multipart: { parts: Array.from({ length: 6 }, (_, index) => JSON.stringify({ part: index + 1 })), commit: "commit" },
       trimmedCompactionMessages: 4,
       release() {},
     }),
@@ -294,7 +295,7 @@ test("launcher helper protocol preserves multipart context and the compaction fl
     type: "prepared_selected_ack",
     prepared: {
         text: "commit",
-        multipart: { parts: ["{\"part\":1}", "{\"part\":2}", "{\"part\":3}"], commit: "commit" },
+        multipart: { parts: Array.from({ length: 6 }, (_, index) => JSON.stringify({ part: index + 1 })), commit: "commit" },
         trimmedCompactionMessages: 4,
     },
   });
