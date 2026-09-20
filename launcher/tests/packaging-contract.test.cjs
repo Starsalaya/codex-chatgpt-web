@@ -59,6 +59,7 @@ test("remote installers fail closed and packaging keeps local verification", () 
   assert.doesNotMatch(packager, /process\.execPath/);
   assert.match(packager, /electron-builder\/out\/cli\/cli\.js/);
   assert.match(packager, /target === "--mac" && !env\.CSC_LINK && !env\.CSC_NAME/);
+  assert.match(packager, /CSC_FOR_PULL_REQUEST = "true"/);
   assert.match(packager, /--config\.mac\.identity=-/);
   assert.match(packager, /verifySignedMacArchive\(\)/);
   assert.match(packager, /codesign[\s\S]*--verify[\s\S]*--deep[\s\S]*--strict/);
