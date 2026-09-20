@@ -2,7 +2,13 @@ import { cpSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } fr
 import { createRequire } from "node:module";
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
-import { defaultBrokerEndpoint } from "../src/config";
+import {
+  CHATGPT_CONNECTOR_NAME,
+  defaultBrokerEndpoint,
+  type AppConfig,
+  ZERO_RISK_CHATGPT_CONNECTOR_NAME,
+} from "../src/config";
+import { routeUrl } from "../src/codex-integration-shared";
 import { VERSION } from "../src/version";
 
 const require = createRequire(import.meta.url);
@@ -62,20 +68,29 @@ mkdirSync(codexHome, { recursive: true });
 const portServer = Bun.listen({ hostname: "127.0.0.1", port: 0, socket: { data() {} } });
 const port = portServer.port;
 portServer.stop();
-const config = {
+const config: AppConfig = {
   version: 3,
   releaseVersion: VERSION,
   mode: "browser-only",
+  subagentProtocol: "native",
   host: "127.0.0.1",
   port,
   contextWindow: 256_000,
-  appName: "Codex Native",
+  appName: CHATGPT_CONNECTOR_NAME,
+  automaticAppName: CHATGPT_CONNECTOR_NAME,
+  manualAppName: ZERO_RISK_CHATGPT_CONNECTOR_NAME,
   browserHost: "managed-chrome",
+  browserInteractionMode: "automatic",
   chromeExecutablePath: "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
   storageStatePath: join(appHome, "browser", "storage-state.json"),
   brokerSocketPath: defaultBrokerEndpoint(appHome),
   headed: true,
+  solAvailable: true,
+  extraHighAvailable: false,
   proAvailable: true,
+  experimentalBiggerContext: false,
+  experimentalSkillAttachments: false,
+  zeroRiskProEnabled: false,
   autoApproveToolCalls: false,
   controlToken: "release-smoke-control-token-0123456789abcdef",
   runtimeCommand,
@@ -99,21 +114,22 @@ try {
   }
   if (!health?.ok) throw new Error("relocated daemon did not become healthy");
   const payload = await health.json() as Record<string, unknown>;
-  if (payload.service !== "codex-chatgpt-web" || payload.mode !== "browser-only") {
+  if (payload.service !== "codex-chatgpt-web-secure" || payload.mode !== "browser-only") {
     throw new Error(`unexpected health payload: ${JSON.stringify(payload)}`);
   }
 
-  const unauthenticatedModels = await fetch(`http://127.0.0.1:${port}/v1/models`);
+  const providerBaseUrl = routeUrl(config);
+  const unauthenticatedModels = await fetch(`${providerBaseUrl}/models`);
   const unauthenticatedModelsBody = await unauthenticatedModels.json() as { error?: { message?: string } };
   if (unauthenticatedModels.status !== 502
     || !unauthenticatedModelsBody.error?.message?.includes("incoming Bearer authorization")) {
     throw new Error(`native model passthrough did not fail closed without Codex auth: ${JSON.stringify(unauthenticatedModelsBody)}`);
   }
-  const websocketNegotiation = await fetch(`http://127.0.0.1:${port}/v1/responses`);
+  const websocketNegotiation = await fetch(`${providerBaseUrl}/responses`);
   if (websocketNegotiation.status !== 426) {
     throw new Error(`Responses WebSocket negotiation did not select Codex HTTP/SSE fallback: HTTP ${websocketNegotiation.status}`);
   }
-  const invalid = await fetch(`http://127.0.0.1:${port}/v1/responses`, {
+  const invalid = await fetch(`${providerBaseUrl}/responses`, {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ model: "chatgpt-web/not-enabled", input: "test", stream: false }),
@@ -135,7 +151,7 @@ try {
     || drainPayload.active_http_turns !== 0 || drainPayload.active_browser_turns !== 0) {
     throw new Error(`daemon did not acknowledge an idle authenticated drain: ${JSON.stringify(drainPayload)}`);
   }
-  const rejectedWhileDraining = await fetch(`http://127.0.0.1:${port}/v1/responses`, {
+  const rejectedWhileDraining = await fetch(`${providerBaseUrl}/responses`, {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ model: "chatgpt-web/high", reasoning: { effort: "high" }, input: "test", stream: false }),

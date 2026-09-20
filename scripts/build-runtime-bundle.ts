@@ -8,6 +8,7 @@ import {
   readdirSync,
   readFileSync,
   realpathSync,
+  renameSync,
   rmSync,
   statSync,
   writeFileSync,
@@ -48,6 +49,72 @@ const appDir = join(output, "app");
 const runtimeDir = join(output, "runtime");
 const binDir = join(output, "bin");
 
+function pathIsWithin(rootPath: string, candidatePath: string): boolean {
+  const normalizedRoot = process.platform === "win32" ? rootPath.toLowerCase() : rootPath;
+  const normalizedCandidate = process.platform === "win32" ? candidatePath.toLowerCase() : candidatePath;
+  return normalizedCandidate === normalizedRoot || normalizedCandidate.startsWith(`${normalizedRoot}${sep}`);
+}
+
+function materializeWindowsDirectoryJunctions(rootDirectory: string): void {
+  const canonicalRoot = realpathSync(rootDirectory);
+  let temporaryCounter = 0;
+
+  const assertCopyTreeHasNoLinks = (directory: string): void => {
+    for (const entry of readdirSync(directory, { withFileTypes: true })) {
+      const absolutePath = join(directory, entry.name);
+      const metadata = lstatSync(absolutePath);
+      if (metadata.isSymbolicLink()) {
+        const canonicalTarget = realpathSync(absolutePath);
+        if (!pathIsWithin(canonicalRoot, canonicalTarget)) {
+          throw new Error(`Nested runtime dependency link escapes the staged app: ${relative(rootDirectory, absolutePath)}`);
+        }
+        throw new Error(`Nested runtime dependency link cannot be safely materialized: ${relative(rootDirectory, absolutePath)}`);
+      }
+      if (metadata.isDirectory()) assertCopyTreeHasNoLinks(absolutePath);
+    }
+  };
+
+  const visit = (directory: string): void => {
+    for (const entry of readdirSync(directory, { withFileTypes: true })) {
+      const absolutePath = join(directory, entry.name);
+      const linkMetadata = lstatSync(absolutePath);
+      if (!linkMetadata.isSymbolicLink()) {
+        if (linkMetadata.isDirectory()) visit(absolutePath);
+        continue;
+      }
+
+      const canonicalTarget = realpathSync(absolutePath);
+      if (!pathIsWithin(canonicalRoot, canonicalTarget)) {
+        throw new Error(`Runtime dependency link escapes the staged app: ${relative(rootDirectory, absolutePath)}`);
+      }
+      if (pathIsWithin(canonicalTarget, absolutePath)) {
+        throw new Error(`Runtime dependency link targets its own ancestor: ${relative(rootDirectory, absolutePath)}`);
+      }
+
+      const targetMetadata = statSync(absolutePath);
+      if (!targetMetadata.isDirectory()) continue;
+      assertCopyTreeHasNoLinks(canonicalTarget);
+      const temporaryPath = `${absolutePath}.materializing-${process.pid}-${temporaryCounter++}`;
+      try {
+        cpSync(canonicalTarget, temporaryPath, {
+          recursive: true,
+          dereference: false,
+          force: false,
+          errorOnExist: true,
+        });
+      } catch (error) {
+        rmSync(temporaryPath, { recursive: true, force: true });
+        throw error;
+      }
+      rmSync(absolutePath, { recursive: true, force: true });
+      renameSync(temporaryPath, absolutePath);
+      visit(absolutePath);
+    }
+  };
+
+  visit(rootDirectory);
+}
+
 rmSync(output, { recursive: true, force: true });
 mkdirSync(appDir, { recursive: true });
 mkdirSync(runtimeDir, { recursive: true });
@@ -82,7 +149,15 @@ if (!browserHelperBuild.success) {
 
 copyFileSync(join(root, "package.json"), join(appDir, "package.json"));
 copyFileSync(join(root, "bun.lock"), join(appDir, "bun.lock"));
-const install = Bun.spawnSync([process.execPath, "install", "--production", "--frozen-lockfile", "--ignore-scripts"], {
+const install = Bun.spawnSync([
+  process.execPath,
+  "install",
+  "--production",
+  "--frozen-lockfile",
+  "--ignore-scripts",
+  "--linker=hoisted",
+  "--backend=copyfile",
+], {
   cwd: appDir,
   stdout: "pipe",
   stderr: "pipe",
@@ -90,6 +165,7 @@ const install = Bun.spawnSync([process.execPath, "install", "--production", "--f
 if (install.exitCode !== 0) {
   throw new Error(`Runtime dependencies failed to install: ${install.stderr.toString() || install.stdout.toString()}`);
 }
+if (process.platform === "win32") materializeWindowsDirectoryJunctions(appDir);
 const bunName = process.platform === "win32" ? "bun.exe" : "bun";
 cpSync(embeddedBunExecutable(), join(runtimeDir, bunName));
 if (process.platform !== "win32") chmodSync(join(runtimeDir, bunName), 0o755);

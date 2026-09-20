@@ -307,7 +307,7 @@ test("DEV browser-only setup persists only the isolated harness profile", async 
       endpoint: "http://127.0.0.1:48121",
       control: { endpoint: `http://127.0.0.1:${address.port}`, token: controlToken },
       helper: { executable: process.execPath, script: helperScript },
-      partition: "persist:codex-web-gpt-dev-chatgpt",
+      partition: "persist:codex-web-gpt-secure-dev-chatgpt",
       idleUrl: LAUNCHER_BROWSER_IDLE_URL,
       surfaceId: "d".repeat(32),
       surfaceTargets: { ["d".repeat(32)]: "native-owned-target" },
@@ -368,7 +368,7 @@ test("DEV setup accepts explicit browser-interaction flags and preserves manual 
         token: "dev-manual-control-token-0123456789abcdefghijklmnop",
       },
       helper: { executable: process.execPath, script: helperScript },
-      partition: "persist:codex-web-gpt-dev-chatgpt",
+      partition: "persist:codex-web-gpt-secure-dev-chatgpt",
       idleUrl: LAUNCHER_BROWSER_IDLE_URL,
       surfaceId: "m".repeat(32),
       surfaceTargets: { ["m".repeat(32)]: "native-owned-target" },
@@ -442,7 +442,7 @@ test("browser check uses metadata-only launcher liveness in Zero Risk", async ()
         token: "manual-browser-check-token-0123456789abcdefghijklmnop",
       },
       helper: { executable: process.execPath, script: helperScript },
-      partition: "persist:codex-web-gpt-chatgpt",
+      partition: "persist:codex-web-gpt-secure-chatgpt",
       idleUrl: LAUNCHER_BROWSER_IDLE_URL,
       surfaceId: "s".repeat(32),
       surfaceTargets: { ["s".repeat(32)]: "native-owned-target" },
@@ -487,12 +487,13 @@ test("terminal uninstall refuses to race a launcher-owned runtime", async () => 
   writeFileSync(configPath, `${JSON.stringify({
     version: 3,
     releaseVersion: "0.2.0",
-    mode: "browser-only",
+    mode: "full",
     host: "127.0.0.1",
     port: 17841,
     contextWindow: 256_000,
-    appName: "Codex Native",
+    appName: ZERO_RISK_CHATGPT_CONNECTOR_NAME,
     browserHost: "launcher",
+    browserInteractionMode: "manual",
     browserHostDescriptorPath: join(appHome, "runtime", "launcher-browser.json"),
     chromeExecutablePath: process.execPath,
     storageStatePath: join(appHome, "browser", "storage-state.json"),
@@ -502,6 +503,14 @@ test("terminal uninstall refuses to race a launcher-owned runtime", async () => 
     autoApproveToolCalls: false,
     controlToken: "launcher-uninstall-control-token-0123456789abcdef",
     runtimeCommand: [process.execPath],
+    tunnel: {
+      binaryPath: process.execPath,
+      tunnelId: `tunnel_${"b".repeat(32)}`,
+      runtimeKeyFile: join(appHome, "runtime.key"),
+      profileDir: join(appHome, "tunnel-profile"),
+      profileName: "manual-uninstall",
+      alias: "manual-uninstall",
+    },
   })}\n`);
   try {
     const result = await runCli([
@@ -541,7 +550,7 @@ test("authorized launcher uninstall does not re-probe an already stopped full ru
     endpoint: "http://127.0.0.1:48111",
     control: { endpoint: "http://127.0.0.1:48112", token },
     helper: { executable: process.execPath, script: helperScript },
-    partition: "persist:codex-web-gpt-chatgpt",
+    partition: "persist:codex-web-gpt-secure-chatgpt",
     idleUrl: LAUNCHER_BROWSER_IDLE_URL,
     surfaceId: "a".repeat(32),
     surfaceTargets: { ["a".repeat(32)]: "native-owned-target" },
@@ -554,8 +563,9 @@ test("authorized launcher uninstall does not re-probe an already stopped full ru
     host: "127.0.0.1",
     port: 17841,
     contextWindow: 256_000,
-    appName: "Codex Native",
+    appName: ZERO_RISK_CHATGPT_CONNECTOR_NAME,
     browserHost: "launcher",
+    browserInteractionMode: "manual",
     browserHostDescriptorPath: descriptorPath,
     chromeExecutablePath: process.execPath,
     storageStatePath: join(appHome, "browser", "storage-state.json"),
@@ -587,7 +597,7 @@ test("authorized launcher uninstall does not re-probe an already stopped full ru
       CODEX_WEB_GPT_LAUNCHER_CONTROL_TOKEN: token,
     });
     expect({ exitCode: result.exitCode, stderr: result.stderr }).toEqual({ exitCode: 0, stderr: "" });
-    expect(result.stdout).toContain("Uninstalled and removed private application data");
+    expect(result.stdout).toContain("Uninstalled and removed bridge data");
     expect(existsSync(appHome)).toBe(false);
   } finally {
     rmSync(root, { recursive: true, force: true });

@@ -137,7 +137,7 @@ test("native dialogs and IPC accept exactly the renderer's supported languages",
     const copy = nativeCopyFor(language);
     assert.deepEqual(Object.keys(copy).sort(), Object.keys(english).sort());
     assert.ok(Object.values(copy).every(value => typeof value === "string" && value.trim()));
-    if (language !== "en") for (const key of ["quit", "remove", "retry", "startupTitle"]) assert.notEqual(copy[key], english[key]);
+    if (language !== "en") for (const key of ["quit", "disconnect", "removeAndErase", "retry", "startupTitle"]) assert.notEqual(copy[key], english[key]);
   }
   for (const language of ["__proto__", "constructor", "unknown", null, [], {}]) assert.throws(() => validateLanguage(language), /Language must/);
 });

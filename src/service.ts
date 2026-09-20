@@ -5,7 +5,7 @@ import type { AppConfig } from "./config";
 import { assertDurableRuntimeCommand, atomicWriteFile, getConfigDir } from "./config";
 import { runCommand, runChecked } from "./process";
 
-const LABEL = "io.github.codex-chatgpt-web.daemon";
+const LABEL = "io.github.codex-chatgpt-web-secure.daemon";
 
 export interface ServiceStatus {
   supported: boolean;

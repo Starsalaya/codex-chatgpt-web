@@ -134,7 +134,7 @@ for (const scenario of [
     version: 3, kind: LAUNCHER_BROWSER_HOST_KIND, profile: "development", pid: process.pid,
     endpoint: server.descriptor().endpoint, control: server.descriptor(),
     helper: { executable: process.execPath, script: import.meta.path },
-    partition: "persist:codex-web-gpt-dev-chatgpt", idleUrl: LAUNCHER_BROWSER_IDLE_URL,
+      partition: "persist:codex-web-gpt-secure-dev-chatgpt", idleUrl: LAUNCHER_BROWSER_IDLE_URL,
     surfaceId: "launcher_surface_id_0123456789AB", createdAt: new Date().toISOString(),
     surfaceTargets: { launcher_surface_id_0123456789AB: "native-owned-target" },
   }), { mode: 0o600 });

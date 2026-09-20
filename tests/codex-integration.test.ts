@@ -17,7 +17,7 @@ import {
   setCodexSubagentProtocol,
   uninstallCodexIntegration,
 } from "../src/codex-integration";
-import { defaultConfig, loadConfig, saveConfig } from "../src/config";
+import { defaultConfig, loadConfig, saveConfig, ZERO_RISK_CHATGPT_CONNECTOR_NAME } from "../src/config";
 import {
   CODEX_REALTIME_WEBRTC_CALL_BASE_URL,
   MANAGED_COMMENT,
@@ -25,6 +25,7 @@ import {
   MANAGED_MULTI_AGENT_V2_LINE,
   MANAGED_ROUTE_COMMENT,
   managedAgentMaxDepthLine,
+  routeUrl,
   restoreFileSnapshot,
   snapshotFile,
   writeFilesWithCompensation,
@@ -75,7 +76,21 @@ describe("reversible native Codex route integration", () => {
     const linkInode = lstatSync(alias).ino;
     const directoryMode = statSync(shared).mode & 0o777;
     const fileMode = statSync(target).mode & 0o777;
-    const config = nativeConfig("browser-only");
+    const config = nativeConfig("full");
+    config.browserHost = "launcher";
+    config.browserInteractionMode = "manual";
+    config.browserHostDescriptorPath = join(codexHome, "launcher-browser.json");
+    config.appName = ZERO_RISK_CHATGPT_CONNECTOR_NAME;
+    const tunnel = {
+      binaryPath: process.execPath,
+      tunnelId: `tunnel_${"a".repeat(32)}`,
+      runtimeKeyFile: join(codexHome, "runtime.key"),
+      profileDir: join(codexHome, "tunnel-profile"),
+      profileName: "secure-test",
+      alias: "secure-test",
+    };
+    config.tunnel = tunnel;
+    config.manualTunnel = tunnel;
     for (const action of [
       () => installCodexIntegration(config),
       () => installCodexIntegration({ ...config, port: config.port + 1 }),
@@ -159,7 +174,7 @@ describe("reversible native Codex route integration", () => {
     const journal = installCodexIntegration(nativeConfig("browser-only"));
     const installed = readFileSync(configPath, "utf8");
     expect(journal.version).toBe(10);
-    expect(installed).toContain('openai_base_url = "http://127.0.0.1:17841/v1"');
+    expect(installed).toMatch(/openai_base_url = "http:\/\/127\.0\.0\.1:17841\/bridge\/[A-Za-z0-9_-]{40,}\/v1"/);
     expect(installed).toContain(
       `experimental_realtime_webrtc_call_base_url = ${JSON.stringify(CODEX_REALTIME_WEBRTC_CALL_BASE_URL)}`,
     );
@@ -199,7 +214,7 @@ describe("reversible native Codex route integration", () => {
     expect(installed).toContain("multi_agent = false # native choice");
     expect(installed).toContain("multi_agent_v2 = true # native choice");
     expect(journal.installed).toEqual({
-      openai_base_url: "http://127.0.0.1:17841/v1",
+      openai_base_url: expect.stringMatching(/^http:\/\/127\.0\.0\.1:17841\/bridge\/[A-Za-z0-9_-]{40,}\/v1$/),
       experimental_realtime_webrtc_call_base_url: CODEX_REALTIME_WEBRTC_CALL_BASE_URL,
       subagent_protocol: "native",
     });
@@ -388,7 +403,21 @@ describe("reversible native Codex route integration", () => {
     const configPath = join(codexHome, "config.toml");
     const original = 'model = "gpt-5.6-sol"\n\n[features]\nmulti_agent_v2 = true # native choice\n';
     writeFileSync(configPath, original);
-    const config = nativeConfig("browser-only");
+    const config = nativeConfig("full");
+    config.browserHost = "launcher";
+    config.browserInteractionMode = "manual";
+    config.browserHostDescriptorPath = join(codexHome, "launcher-browser.json");
+    config.appName = ZERO_RISK_CHATGPT_CONNECTOR_NAME;
+    const tunnel = {
+      binaryPath: process.execPath,
+      tunnelId: `tunnel_${"b".repeat(32)}`,
+      runtimeKeyFile: join(codexHome, "runtime.key"),
+      profileDir: join(codexHome, "tunnel-profile"),
+      profileName: "secure-protocol-test",
+      alias: "secure-protocol-test",
+    };
+    config.tunnel = tunnel;
+    config.manualTunnel = tunnel;
     saveConfig(config);
     installCodexIntegration(config);
     expect(readCodexSubagentProtocol()).toBe("native");
@@ -663,7 +692,7 @@ describe("reversible native Codex route integration", () => {
     expect(() => installCodexIntegration(config)).toThrow("--replace-codex-route");
     installCodexIntegration(config, { replaceExistingRoute: true });
     const installed = readFileSync(configPath, "utf8");
-    expect(installed).toContain('openai_base_url = "http://127.0.0.1:17841/v1"');
+    expect(installed).toContain(`openai_base_url = ${JSON.stringify(routeUrl(config))}`);
     expect(installed).toContain('model_provider = "existing-provider"');
     expect(installed).toContain('model_catalog_json = "/tmp/native.json"');
 
@@ -798,7 +827,7 @@ describe("reversible native Codex route integration", () => {
     const second = nativeConfig("browser-only");
     second.port = 17842;
     installCodexIntegration(second);
-    expect(readFileSync(configPath, "utf8")).toContain('openai_base_url = "http://127.0.0.1:17842/v1"');
+    expect(readFileSync(configPath, "utf8")).toContain(`openai_base_url = ${JSON.stringify(routeUrl(second))}`);
     uninstallCodexIntegration();
     expect(readFileSync(configPath, "utf8")).toBe('model = "gpt-5.6-sol"\n');
   });
@@ -843,7 +872,7 @@ describe("reversible native Codex route integration", () => {
 
     expect(activateCodexIntegration()).toEqual({ changed: true, active: true });
     const reconnected = readFileSync(configPath, "utf8");
-    expect(reconnected).toContain('openai_base_url = "http://127.0.0.1:17841/v1"');
+    expect(reconnected).toMatch(/openai_base_url = "http:\/\/127\.0\.0\.1:17841\/bridge\/[A-Za-z0-9_-]{40,}\/v1"/);
     expect(reconnected).not.toContain("remote_compaction_v2");
     expect(reconnected).not.toContain("multi_agent");
     expect(reconnected).toContain('approval_policy = "never"');

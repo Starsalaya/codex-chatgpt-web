@@ -18,7 +18,7 @@ const config = {
 
 test("setup accepts only a matching daemon that is ready for new Codex turns", () => {
   const ready = {
-    service: "codex-chatgpt-web",
+    service: "codex-chatgpt-web-secure",
     status: "ok",
     mode: "browser-only",
     version: "0.2.0",
@@ -91,7 +91,7 @@ for (const development of [false, true]) for (const interaction of ["manual", "a
       await listener.stop(true);
       const result = await (development ? setupDevProfile : setup)({ ...options, port });
       expect(calls).toEqual(development ? ["save"] : ["save", "integrate"]);
-      expect(saved?.tunnel?.alias).toBe(`codex-chatgpt-web${development ? "-dev" : ""}${interaction === "manual" ? "-zero-risk" : ""}`);
+      expect(saved?.tunnel?.alias).toBe(`codex-chatgpt-web-secure${development ? "-dev" : ""}${interaction === "manual" ? "-zero-risk" : ""}`);
       expect(result.tunnelReady).not.toBe(true);
       expect(result.connectorSetupRequired).toBe(true);
 
@@ -118,7 +118,7 @@ test.skipIf(process.platform !== "darwin")("external service setup retains valid
     acknowledgedUnofficialAt: new Date().toISOString(),
   };
   const proxy = Bun.serve({ port: 0, hostname: "127.0.0.1", fetch: () => Response.json({
-    service: "codex-chatgpt-web", status: "ok", mode: "full", version: existing.releaseVersion, accepting_turns: true,
+    service: "codex-chatgpt-web-secure", status: "ok", mode: "full", version: existing.releaseVersion, accepting_turns: true,
   }) });
   existing.port = proxy.port!;
   const calls: string[] = [];

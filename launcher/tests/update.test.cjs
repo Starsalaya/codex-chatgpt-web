@@ -42,10 +42,10 @@ test("release comparison and platform assets are strict", () => {
   assert.equal(compareVersions("1.1.4", "1.1.4"), 0);
   assert.equal(compareVersions("1.1.3", "1.1.4"), -1);
   assert.equal(compareVersions("1.2.0", "1.1.99"), 1);
-  assert.equal(releaseAssetName("1.2.0", "darwin", "arm64"), "codex-web-gpt-1.2.0-mac-arm64.zip");
-  assert.equal(releaseAssetName("1.2.0", "darwin", "x64"), "codex-web-gpt-1.2.0-mac-x64.zip");
-  assert.equal(releaseAssetName("1.2.0", "win32", "x64"), "codex-web-gpt-1.2.0-win-x64.exe");
-  assert.equal(releaseAssetName("1.2.0", "linux", "x64"), "codex-web-gpt-1.2.0-linux-x64.AppImage");
+  assert.equal(releaseAssetName("1.2.0", "darwin", "arm64"), "codex-web-gpt-secure-1.2.0-mac-arm64.zip");
+  assert.equal(releaseAssetName("1.2.0", "darwin", "x64"), "codex-web-gpt-secure-1.2.0-mac-x64.zip");
+  assert.equal(releaseAssetName("1.2.0", "win32", "x64"), "codex-web-gpt-secure-1.2.0-win-x64.exe");
+  assert.equal(releaseAssetName("1.2.0", "linux", "x64"), "codex-web-gpt-secure-1.2.0-linux-x64.AppImage");
   assert.equal(releaseAssetName("1.2.0", "linux", "arm64"), null);
 });
 
@@ -55,11 +55,11 @@ test("checksums and release URLs bind the exact expected asset", () => {
   assert.throws(() => expectedChecksum(`${hash}  other.zip\n`, "launcher.zip"), /no entry/);
   assert.equal(
     validateReleaseAssetUrl(
-      "https://github.com/miuuyy/codex-chatgpt-web/releases/download/v1.2.0/launcher.zip",
+      "https://github.com/Starsalaya/codex-chatgpt-web/releases/download/v1.2.0/launcher.zip",
       "1.2.0",
       "launcher.zip",
     ),
-    "https://github.com/miuuyy/codex-chatgpt-web/releases/download/v1.2.0/launcher.zip",
+    "https://github.com/Starsalaya/codex-chatgpt-web/releases/download/v1.2.0/launcher.zip",
   );
   assert.throws(
     () => validateReleaseAssetUrl("https://example.com/launcher.zip", "1.2.0", "launcher.zip"),
@@ -75,10 +75,34 @@ test("macOS bundle resolution never guesses outside Contents/MacOS", () => {
   assert.throws(() => macApplicationPath("/tmp/Codex Web GPT"), /Could not resolve/);
 });
 
+test("remote updates are disabled by default and never contact the release service", async () => {
+  let calls = 0;
+  const controller = createUpdateController({
+    currentVersion: "1.1.4",
+    platform: "win32",
+    arch: "x64",
+    packaged: true,
+    executablePath: "C:\\Program Files\\Codex Web GPT Secure\\launcher.exe",
+    runtimeExecutable: "C:\\runtime\\bun.exe",
+    logsDirectory: "C:\\logs",
+    dependencies: {
+      fetchRelease: async () => {
+        calls += 1;
+        throw new Error("must not run");
+      },
+    },
+  });
+
+  assert.deepEqual(controller.getState(), { status: "disabled" });
+  assert.deepEqual(await controller.checkOnce(), { status: "disabled" });
+  assert.equal(calls, 0);
+});
+
 test("startup check runs once and exposes only a newer complete release", async () => {
   let calls = 0;
   const published = [];
   const controller = createUpdateController({
+    enabled: true,
     currentVersion: "1.1.4",
     platform: "linux",
     arch: "x64",
@@ -94,12 +118,12 @@ test("startup check runs once and exposes only a newer complete release", async 
           tag_name: "v1.2.0",
           assets: [
             {
-              name: "codex-web-gpt-1.2.0-linux-x64.AppImage",
-              browser_download_url: "https://github.com/miuuyy/codex-chatgpt-web/releases/download/v1.2.0/codex-web-gpt-1.2.0-linux-x64.AppImage",
+              name: "codex-web-gpt-secure-1.2.0-linux-x64.AppImage",
+              browser_download_url: "https://github.com/Starsalaya/codex-chatgpt-web/releases/download/v1.2.0/codex-web-gpt-secure-1.2.0-linux-x64.AppImage",
             },
             {
               name: "checksums.txt",
-              browser_download_url: "https://github.com/miuuyy/codex-chatgpt-web/releases/download/v1.2.0/checksums.txt",
+              browser_download_url: "https://github.com/Starsalaya/codex-chatgpt-web/releases/download/v1.2.0/checksums.txt",
             },
           ],
         };
@@ -129,6 +153,7 @@ test("verified update is handed to one detached worker", async () => {
   process.env.CODEX_WEB_GPT_LAUNCHER_EXECUTABLE = wrapper;
   try {
     const controller = createUpdateController({
+      enabled: true,
       currentVersion: "1.1.4",
       platform: "linux",
       arch: "x64",
@@ -141,16 +166,16 @@ test("verified update is handed to one detached worker", async () => {
           tag_name: "v1.2.0",
           assets: [
             {
-              name: "codex-web-gpt-1.2.0-linux-x64.AppImage",
-              browser_download_url: "https://github.com/miuuyy/codex-chatgpt-web/releases/download/v1.2.0/codex-web-gpt-1.2.0-linux-x64.AppImage",
+              name: "codex-web-gpt-secure-1.2.0-linux-x64.AppImage",
+              browser_download_url: "https://github.com/Starsalaya/codex-chatgpt-web/releases/download/v1.2.0/codex-web-gpt-secure-1.2.0-linux-x64.AppImage",
             },
             {
               name: "checksums.txt",
-              browser_download_url: "https://github.com/miuuyy/codex-chatgpt-web/releases/download/v1.2.0/checksums.txt",
+              browser_download_url: "https://github.com/Starsalaya/codex-chatgpt-web/releases/download/v1.2.0/checksums.txt",
             },
           ],
         }),
-        downloadText: async () => `${hash}  codex-web-gpt-1.2.0-linux-x64.AppImage\n`,
+        downloadText: async () => `${hash}  codex-web-gpt-secure-1.2.0-linux-x64.AppImage\n`,
         downloadFile: async (_url, destination) => fs.writeFileSync(destination, assetBody),
         sha256: (filePath) => require("node:crypto").createHash("sha256").update(fs.readFileSync(filePath)).digest("hex"),
         spawnWorker: (runtime, worker, job) => {

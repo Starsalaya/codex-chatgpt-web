@@ -62,7 +62,7 @@ test("daemon streams browser lifecycle through the real helper process", async (
       token: "launcher-control-token-0123456789abcdefghijklmnop",
     },
     helper: { executable: process.execPath, script: descriptorHelper },
-    partition: "persist:codex-web-gpt-chatgpt",
+    partition: "persist:codex-web-gpt-secure-chatgpt",
     idleUrl: LAUNCHER_BROWSER_IDLE_URL,
     surfaceId: "launcher_surface_id_0123456789AB",
     surfaceTargets: { ["launcher_surface_id_0123456789AB"]: "native-owned-target" },
@@ -177,7 +177,7 @@ test("accepted compaction retires through the helper as completed without hiding
     endpoint: `http://127.0.0.1:${server.port}`,
     control: { endpoint: `http://127.0.0.1:${server.port}`, token: "launcher-control-token-0123456789abcdefghijklmnop" },
     helper: { executable: process.execPath, script: helper },
-    partition: "persist:codex-web-gpt-chatgpt", idleUrl: LAUNCHER_BROWSER_IDLE_URL,
+      partition: "persist:codex-web-gpt-secure-chatgpt", idleUrl: LAUNCHER_BROWSER_IDLE_URL,
     surfaceId: "launcher_surface_id_0123456789AB", createdAt: new Date().toISOString(),
     surfaceTargets: { launcher_surface_id_0123456789AB: "native-owned-target" },
   }), { mode: 0o600 });

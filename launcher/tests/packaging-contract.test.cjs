@@ -23,8 +23,8 @@ test("the full verification gate audits launcher dependencies", () => {
 });
 
 test("launcher publishes native packages for all supported desktop operating systems", () => {
-  assert.equal(manifest.build.appId, "dev.codexwebgpt.launcher");
-  assert.equal(manifest.build.artifactName, "codex-web-gpt-${version}-${os}-${arch}.${ext}");
+  assert.equal(manifest.build.appId, "dev.codexwebgpt.secure.launcher");
+  assert.equal(manifest.build.artifactName, "codex-web-gpt-secure-${version}-${os}-${arch}.${ext}");
   assert.deepEqual(manifest.build.mac.target, ["dmg", "zip"]);
   assert.deepEqual(
     manifest.build.mac.signIgnore,
@@ -45,58 +45,29 @@ test("launcher publishes native packages for all supported desktop operating sys
   assert.match(manifest.build.nsis.guid, /^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/);
 });
 
-test("release installers resolve checksummed native launcher assets", () => {
+test("remote installers fail closed and packaging keeps local verification", () => {
   const shellInstaller = fs.readFileSync(path.join(repositoryRoot, "scripts", "install-launcher.sh"), "utf8");
   const windowsInstaller = fs.readFileSync(path.join(repositoryRoot, "scripts", "install-launcher.ps1"), "utf8");
   const devProfile = fs.readFileSync(path.join(repositoryRoot, "src", "dev-chat", "profile.ts"), "utf8");
   const packager = fs.readFileSync(path.join(launcherRoot, "scripts", "package.cjs"), "utf8");
   for (const installer of [shellInstaller, windowsInstaller]) {
-    assert.match(installer, /checksums\.txt/);
-    assert.match(installer, /SHA-?256/i);
-    assert.match(installer, /releases\/download/);
+    assert.match(installer, /Remote installation is disabled/);
+    assert.doesNotMatch(installer, /checksums\.txt|releases\/download|Invoke-WebRequest|curl -fsSL/);
   }
-  assert.match(shellInstaller, /PLATFORM="mac"/);
-  assert.match(shellInstaller, /PLATFORM="linux"/);
-  assert.match(shellInstaller, /codex-web-gpt\.desktop/);
-  assert.match(shellInstaller, /--appimage-extract/);
   assert.match(packager, /-linux-x86_64\(\?=\\\.\).*?-linux-x64/);
   assert.match(packager, /const executable = "node"/);
   assert.doesNotMatch(packager, /process\.execPath/);
   assert.match(packager, /electron-builder\/out\/cli\/cli\.js/);
   assert.match(packager, /target === "--mac" && !env\.CSC_LINK && !env\.CSC_NAME/);
+  assert.match(packager, /CSC_FOR_PULL_REQUEST = "true"/);
   assert.match(packager, /--config\.mac\.identity=-/);
   assert.match(packager, /verifySignedMacArchive\(\)/);
   assert.match(packager, /codesign[\s\S]*--verify[\s\S]*--deep[\s\S]*--strict/);
   assert.match(packager, /validateRuntimeBundle/);
   assert.doesNotMatch(packager, /electron-builder\.cmd/);
-  assert.match(shellInstaller, /shell_quote\(\)/);
-  assert.match(shellInstaller, /RUNNER_SOURCE/);
-  assert.match(shellInstaller, /exec %s %s "\$@"/);
-  assert.doesNotMatch(shellInstaller, /APPIMAGE_EXTRACT_AND_RUN=.*1/);
-  assert.ok(
-    shellInstaller.indexOf('chmod 0755 "$TEMP_DIR/$ASSET"')
-      < shellInstaller.indexOf('"$TEMP_DIR/$ASSET" --appimage-extract'),
-    "the downloaded AppImage must be executable before it is inspected",
-  );
-  assert.match(windowsInstaller, /codex-web-gpt-\$Version-win-\$Arch\.exe/);
-  assert.match(windowsInstaller, /\[Environment\]::Is64BitOperatingSystem/);
-  assert.doesNotMatch(windowsInstaller, /RuntimeInformation/);
-  assert.match(windowsInstaller, /function Test-IsFullyQualifiedWindowsPath/);
-  assert.match(windowsInstaller, /Test-IsFullyQualifiedWindowsPath \$InstallLocation/);
-  assert.doesNotMatch(windowsInstaller, /IsPathFullyQualified/);
-  const windowsPathPattern = windowsInstaller.match(/return \$Path -match '([^']+)'/)?.[1];
-  assert.ok(windowsPathPattern, "the Windows installer must expose its absolute-path contract");
-  const fullyQualifiedWindowsPath = new RegExp(windowsPathPattern);
-  assert.equal(fullyQualifiedWindowsPath.test("C:\\Users\\tester\\Codex Web GPT"), true);
-  assert.equal(fullyQualifiedWindowsPath.test("\\\\server\\share\\Codex Web GPT"), true);
-  assert.equal(fullyQualifiedWindowsPath.test("C:Codex Web GPT"), false);
-  assert.equal(fullyQualifiedWindowsPath.test("\\Codex Web GPT"), false);
-  assert.equal(fullyQualifiedWindowsPath.test("Codex Web GPT"), false);
-  assert.ok(windowsInstaller.includes(`HKCU:\\Software\\${manifest.build.nsis.guid}`));
+  assert.match(shellInstaller, /exit 1/);
+  assert.match(windowsInstaller, /throw "Remote installation is disabled/);
   assert.ok(devProfile.includes(`WINDOWS_LAUNCHER_GUID = "${manifest.build.nsis.guid}"`));
-  assert.match(windowsInstaller, /Get-ItemPropertyValue[\s\S]*InstallLocation/);
-  assert.ok(windowsInstaller.includes(`Join-Path $InstallLocation "${manifest.build.productName}.exe"`));
-  assert.match(windowsInstaller, /-ArgumentList "\/S", "\/currentuser"/);
   const packageSmoke = fs.readFileSync(path.join(launcherRoot, "scripts", "smoke-package.cjs"), "utf8");
   assert.match(packageSmoke, /run\(installer, \["\/S", "\/currentuser"\]/);
   assert.match(packageSmoke, /reg\.exe[\s\S]*InstallLocation/);
@@ -136,7 +107,7 @@ test("CI packages and smoke-launches on macOS, Windows, and Linux", () => {
   assert.match(release, /archlinux:base/);
   assert.match(release, /prepare-windows-baseline-bun\.ps1 -Version 1\.4\.0/);
   assert.match(release, /codesign --verify --deep --strict --verbose=2/);
-  assert.match(release, /Codex Web GPT\.app/);
+  assert.match(release, /Codex Web GPT Secure\.app/);
   assert.doesNotMatch(release, /gh release create[\s\S]*?--draft/);
 });
 

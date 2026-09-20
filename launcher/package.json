@@ -1,9 +1,9 @@
 {
-  "name": "codex-web-gpt-launcher",
+  "name": "codex-web-gpt-secure-launcher",
   "version": "5.0.8",
   "private": true,
-  "description": "Desktop control center for Codex ChatGPT Web",
-  "author": "miuuyy",
+  "description": "Security-hardened ChatGPT Web fallback for Codex with automatic and manual modes",
+  "author": "Starsalaya",
   "type": "module",
   "main": "electron/main.cjs",
   "scripts": {
@@ -41,9 +41,9 @@
     "fast-uri": "3.1.6"
   },
   "build": {
-    "appId": "dev.codexwebgpt.launcher",
-    "productName": "Codex Web GPT",
-    "artifactName": "codex-web-gpt-${version}-${os}-${arch}.${ext}",
+    "appId": "dev.codexwebgpt.secure.launcher",
+    "productName": "Codex Web GPT Secure",
+    "artifactName": "codex-web-gpt-secure-${version}-${os}-${arch}.${ext}",
     "asar": true,
     "asarUnpack": [
       "assets/linux-appimage-runner.sh"
@@ -84,7 +84,7 @@
       "target": ["AppImage"]
     },
     "nsis": {
-      "guid": "d1a6026a-6210-588e-9a2b-da3936f94e02",
+      "guid": "92a41ef5-f8b4-4475-a1e7-91d97308e1c9",
       "oneClick": false,
       "perMachine": false,
       "allowElevation": false,

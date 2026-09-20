@@ -264,7 +264,7 @@ export function getCodexJournalRecoveryPath(): string {
 }
 
 export function routeUrl(config: AppConfig): string {
-  return `http://${config.host}:${config.port}/v1`;
+  return `http://${config.host}:${config.port}/bridge/${config.controlToken}/v1`;
 }
 
 export function sha256(value: string | Uint8Array): string {

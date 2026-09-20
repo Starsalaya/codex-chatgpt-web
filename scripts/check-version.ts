@@ -21,10 +21,8 @@ if (packageJson.engines?.bun !== bunVersion) throw new Error(`engines.bun is not
 const expected = [
   ["src/version.ts", `export const VERSION = ${JSON.stringify(packageVersion)};`],
   ["src/adapters/chatgpt-web/mcp-server.ts", "version: VERSION"],
-  ["scripts/install.sh", `VERSION=\"\${CODEX_CHATGPT_WEB_VERSION:-${packageVersion}}\"`],
   ["README.md", `requires Bun ${bunVersion}.`],
   ["README.zh-CN.md", `Bun ${bunVersion}`],
-  ["scripts/install.sh", `Bun-${bunVersion}.md`],
   ["scripts/generate-third-party-notices.ts", `Bun ${bunVersion}`],
   ["scripts/prepare-windows-baseline-bun.ps1", `bun-v$Version`],
   [".github/workflows/ci.yml", `bun-version: ${bunVersion}`],
@@ -37,9 +35,11 @@ for (const [path, needle] of expected) {
 }
 for (const path of ["README.md", "README.zh-CN.md", "README.ja.md", "README.ko.md"]) {
   const readme = readFileSync(resolve(root, path), "utf8");
-  for (const target of ["win-x64.exe", "mac-arm64.dmg", "mac-x64.dmg", "linux-x64.AppImage"]) {
-    const download = `/releases/download/v${packageVersion}/codex-web-gpt-${packageVersion}-${target}`;
-    if (!readme.includes(download)) throw new Error(`${path} download for ${target} is not synchronized to ${packageVersion}`);
+  if (!readme.includes("https://github.com/Starsalaya/codex-chatgpt-web.git")) {
+    throw new Error(`${path} does not point to the security-hardened source fork`);
+  }
+  if (readme.includes("/releases/download/")) {
+    throw new Error(`${path} must not recommend unsigned remote release installers`);
   }
 }
 const releaseWorkflow = readFileSync(resolve(root, ".github/workflows/release.yml"), "utf8");

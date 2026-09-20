@@ -41,7 +41,7 @@ export interface LauncherBrowserHostDescriptor {
   kind: typeof LAUNCHER_BROWSER_HOST_KIND;
   profile: LauncherBrowserHostProfile;
   pid: number;
-  endpoint: string;
+  endpoint?: string;
   control: {
     endpoint: string;
     token: string;
@@ -92,7 +92,9 @@ function assertDescriptorShape(value: unknown): LauncherBrowserHostDescriptor {
   if (!Number.isInteger(descriptor.pid) || descriptor.pid! < 1) {
     throw new Error("Launcher browser descriptor has an invalid pid");
   }
-  const endpoint = assertLoopbackEndpoint(descriptor.endpoint, "Launcher CDP endpoint");
+  const endpoint = descriptor.endpoint === undefined
+    ? undefined
+    : assertLoopbackEndpoint(descriptor.endpoint, "Launcher CDP endpoint");
   if (!descriptor.control || typeof descriptor.control !== "object") {
     throw new Error("Launcher browser descriptor is missing its control channel");
   }
@@ -112,8 +114,8 @@ function assertDescriptorShape(value: unknown): LauncherBrowserHostDescriptor {
     throw new Error("Launcher browser descriptor helper script does not exist");
   }
   const expectedPartition = descriptor.profile === "development"
-    ? "persist:codex-web-gpt-dev-chatgpt"
-    : "persist:codex-web-gpt-chatgpt";
+    ? "persist:codex-web-gpt-secure-dev-chatgpt"
+    : "persist:codex-web-gpt-secure-chatgpt";
   if (descriptor.partition !== expectedPartition) {
     throw new Error("Launcher browser descriptor identifies an unexpected browser partition");
   }
@@ -174,6 +176,9 @@ export function readLauncherBrowserHostDescriptor(configuredPath: string): Launc
 }
 
 async function assertCdpReady(descriptor: LauncherBrowserHostDescriptor, timeoutMs: number): Promise<void> {
+  if (!descriptor.endpoint) {
+    throw new Error("Launcher browser descriptor has no CDP endpoint");
+  }
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
@@ -185,6 +190,24 @@ async function assertCdpReady(descriptor: LauncherBrowserHostDescriptor, timeout
     }
   } catch (error) {
     throw new Error(`Launcher browser CDP endpoint is not ready: ${error instanceof Error ? error.message : String(error)}`);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+async function assertControlReady(descriptor: LauncherBrowserHostDescriptor, timeoutMs: number): Promise<void> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const response = await fetch(`${descriptor.control.endpoint}/healthz`, {
+      headers: { authorization: `Bearer ${descriptor.control.token}` },
+      signal: controller.signal,
+    });
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    const body = await response.json() as Record<string, unknown>;
+    if (body.status !== "ok") throw new Error("unexpected response");
+  } catch (error) {
+    throw new Error(`Launcher browser control endpoint is not ready: ${error instanceof Error ? error.message : String(error)}`);
   } finally {
     clearTimeout(timer);
   }
@@ -203,7 +226,8 @@ export async function inspectLauncherBrowserHostLiveness(
       `Launcher browser belongs to ${descriptor.profile}, but ${options.expectedProfile} was required`,
     );
   }
-  await assertCdpReady(descriptor, options.timeoutMs ?? 5_000);
+  if (descriptor.endpoint) await assertCdpReady(descriptor, options.timeoutMs ?? 5_000);
+  else await assertControlReady(descriptor, options.timeoutMs ?? 5_000);
   return descriptor;
 }
 
@@ -261,6 +285,9 @@ export async function connectLauncherBrowserHost(
     throw new DOMException("Launcher browser connection aborted", "AbortError");
   }
   const descriptor = readLauncherBrowserHostDescriptor(descriptorPath);
+  if (!descriptor.endpoint) {
+    throw new Error("Automatic browser connection requires a launcher CDP endpoint");
+  }
   await assertCdpReady(descriptor, Math.min(timeoutMs, 5_000));
   let browser: Browser;
   try {

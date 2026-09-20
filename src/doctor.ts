@@ -68,7 +68,7 @@ async function proxyCheck(config: AppConfig): Promise<DoctorCheck> {
     const response = await fetch(`http://${config.host}:${config.port}/healthz`, { signal: controller.signal });
     if (!response.ok) return { id: "proxy", status: "error", message: `Responses proxy returned HTTP ${response.status}` };
     const body = await response.json() as Record<string, unknown>;
-    if (body.service !== "codex-chatgpt-web" || body.status !== "ok") {
+    if (body.service !== "codex-chatgpt-web-secure" || body.status !== "ok") {
       return { id: "proxy", status: "error", message: "The configured port belongs to another service" };
     }
     if (body.mode !== config.mode) {

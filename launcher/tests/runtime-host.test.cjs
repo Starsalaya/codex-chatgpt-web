@@ -1130,8 +1130,8 @@ test("failed terminal migration restores removed launchd ownership before verify
   const codexHome = path.join(root, "codex");
   const launchAgentsDir = path.join(root, "LaunchAgents");
   const configPath = path.join(coreHome, "config.json");
-  const daemonPlist = path.join(launchAgentsDir, "io.github.codex-chatgpt-web.daemon.plist");
-  const tunnelPlist = path.join(launchAgentsDir, "io.github.codex-chatgpt-web.tunnel.plist");
+  const daemonPlist = path.join(launchAgentsDir, "io.github.codex-chatgpt-web-secure.daemon.plist");
+  const tunnelPlist = path.join(launchAgentsDir, "io.github.codex-chatgpt-web-secure.tunnel.plist");
   const oldConfig = {
     mode: "full",
     browserHost: "managed-chrome",

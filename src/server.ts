@@ -20,7 +20,7 @@ import { bridgeToResponsesSSE, buildResponseJSON, formatErrorResponse } from "./
 import type { AppConfig } from "./config";
 import { providerConfig } from "./config";
 import { AsyncEventQueue } from "./event-queue";
-import { readJsonRequestBody } from "./http-body";
+import { MAX_ENCODED_REQUEST_BYTES, readJsonRequest } from "./http-body";
 import { httpStatusFromTerminalError } from "./lib/errors";
 import { createHash } from "node:crypto";
 import { augmentNativeModelCatalog } from "./model-catalog";
@@ -470,10 +470,12 @@ export async function responseRequest(
   adapterFactory: ChatGptWebAdapterFactory = createChatGptWebAdapter,
   options: ResponseRequestOptions = {},
 ): Promise<Response> {
-  const nativeRequest = req.clone();
   let raw: unknown;
+  let encodedBody: Uint8Array;
   try {
-    raw = await readJsonRequestBody(req);
+    const read = await readJsonRequest(req);
+    raw = read.value;
+    encodedBody = read.encoded;
   } catch (error) {
     return formatErrorResponse(
       400,
@@ -494,7 +496,7 @@ export async function responseRequest(
   }
   if (typeof requestedModel === "string" && !isChatGptWebModelSlug(requestedModel)) {
     try {
-      return await forwardNativeCodexRequest(nativeRequest, "responses", undefined, raw);
+      return await forwardNativeCodexRequest(req, "responses", undefined, raw, encodedBody);
     } catch (error) {
       return formatErrorResponse(502, "upstream_error", error instanceof Error ? error.message : String(error));
     }
@@ -677,10 +679,12 @@ export async function compactRequest(
   adapterFactory: ChatGptWebAdapterFactory = createChatGptWebAdapter,
   options: Pick<ResponseRequestOptions, "onTurnIdentity"> = {},
 ): Promise<Response> {
-  const nativeRequest = req.clone();
   let raw: Record<string, unknown>;
+  let encodedBody: Uint8Array;
   try {
-    const parsed = await readJsonRequestBody(req);
+    const read = await readJsonRequest(req);
+    const parsed = read.value;
+    encodedBody = read.encoded;
     if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw new Error("not an object");
     raw = parsed as Record<string, unknown>;
   } catch (error) {
@@ -719,7 +723,7 @@ export async function compactRequest(
   }
   if (!isChatGptWebModelSlug(raw.model)) {
     try {
-      return await forwardNativeCodexRequest(nativeRequest, "responses/compact", undefined, raw);
+      return await forwardNativeCodexRequest(req, "responses/compact", undefined, raw, encodedBody);
     } catch (error) {
       return formatErrorResponse(502, "upstream_error", error instanceof Error ? error.message : String(error));
     }
@@ -823,16 +827,32 @@ export function startServer(
     const actual = Buffer.from(header);
     return actual.length === expected.length && timingSafeEqual(actual, expected);
   };
+  const providerPrefix = `/bridge/${config.controlToken}`;
+  const providerPath = (url: URL): string | undefined => {
+    if (!url.pathname.startsWith(`${providerPrefix}/`)) return undefined;
+    return url.pathname.slice(providerPrefix.length);
+  };
+  const providerRequestAllowed = (req: Request, url: URL): Response | undefined => {
+    const expectedPort = String(server.port);
+    if (url.hostname !== config.host || url.port !== expectedPort) {
+      return new Response("Not found", { status: 404 });
+    }
+    if (req.headers.get("origin") || req.headers.get("sec-fetch-site")) {
+      return new Response("Browser-origin requests are not accepted", { status: 403 });
+    }
+    return undefined;
+  };
   const server = Bun.serve({
     hostname: config.host,
     port: config.port,
     idleTimeout: 0,
+    maxRequestBodySize: MAX_ENCODED_REQUEST_BYTES,
     async fetch(req) {
       const url = new URL(req.url);
       if (req.method === "GET" && url.pathname === "/healthz") {
         return Response.json({
           status: "ok",
-          service: "codex-chatgpt-web",
+          service: "codex-chatgpt-web-secure",
           version: VERSION,
           mode: config.mode,
           pid: process.pid,
@@ -984,7 +1004,17 @@ export function startServer(
         setTimeout(shutdown, 0);
         return Response.json({ status: "ok", accepting_turns: false, ...current });
       }
-      if (req.method === "GET" && url.pathname === "/v1/models") {
+      const apiPath = providerPath(url);
+      if (apiPath) {
+        const rejected = providerRequestAllowed(req, url);
+        if (rejected) return rejected;
+        if (req.method === "POST"
+          && (apiPath === "/v1/responses" || apiPath === "/v1/responses/compact" || apiPath === "/v1/alpha/search")
+          && !(req.headers.get("content-type") ?? "").toLowerCase().startsWith("application/json")) {
+          return formatErrorResponse(415, "invalid_request_error", "Content-Type must be application/json");
+        }
+      }
+      if (req.method === "GET" && apiPath === "/v1/models") {
         if (draining) {
           return formatErrorResponse(
             503,
@@ -1034,13 +1064,13 @@ export function startServer(
           return recordResult(response, failure);
         }, req.signal, process.platform, "models");
       }
-      if (req.method === "GET" && url.pathname === "/v1/responses") {
+      if (req.method === "GET" && apiPath === "/v1/responses") {
         return new Response("Responses WebSocket transport is not enabled on this local route", {
           status: 426,
           headers: { "content-type": "text/plain; charset=utf-8" },
         });
       }
-      if (req.method === "POST" && url.pathname === "/v1/responses") {
+      if (req.method === "POST" && apiPath === "/v1/responses") {
         if (draining) return formatErrorResponse(503, "server_error", "codex-chatgpt-web is draining for a requested service operation");
         return httpTurns.track(
           (signal, bindIdentity) => responseRequest(
@@ -1054,7 +1084,7 @@ export function startServer(
           "responses",
         );
       }
-      if (req.method === "POST" && url.pathname === "/v1/responses/compact") {
+      if (req.method === "POST" && apiPath === "/v1/responses/compact") {
         if (draining) return formatErrorResponse(503, "server_error", "codex-chatgpt-web is draining for a requested service operation");
         return httpTurns.track(
           (signal, bindIdentity) => compactRequest(
@@ -1068,7 +1098,7 @@ export function startServer(
           "compact",
         );
       }
-      if (req.method === "POST" && url.pathname === "/v1/alpha/search") {
+      if (req.method === "POST" && apiPath === "/v1/alpha/search") {
         if (draining) return formatErrorResponse(503, "server_error", "codex-chatgpt-web is draining for a requested service operation");
         return httpTurns.track(
           signal => nativeSearchRequest(new Request(req, { signal }), dependencies.fetchUpstream),
@@ -1078,9 +1108,9 @@ export function startServer(
         );
       }
       if (req.method === "POST"
-        && (url.pathname === "/v1/images/generations" || url.pathname === "/v1/images/edits")) {
+        && (apiPath === "/v1/images/generations" || apiPath === "/v1/images/edits")) {
         if (draining) return formatErrorResponse(503, "server_error", "codex-chatgpt-web is draining for a requested service operation");
-        const endpoint: NativeImageEndpoint = url.pathname === "/v1/images/generations"
+        const endpoint: NativeImageEndpoint = apiPath === "/v1/images/generations"
           ? "images/generations"
           : "images/edits";
         return httpTurns.track(

@@ -119,7 +119,7 @@ export function expandUserPath(value: string): string {
 
 export function getConfigDir(): string {
   const configured = process.env.CODEX_CHATGPT_WEB_HOME?.trim();
-  return resolve(expandUserPath(configured || join(homedir(), ".codex-chatgpt-web")));
+  return resolve(expandUserPath(configured || join(homedir(), ".codex-chatgpt-web-secure")));
 }
 
 export function getConfigPath(): string {
