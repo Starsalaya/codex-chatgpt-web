@@ -10,6 +10,7 @@ function redactText(value) {
   const redacted = value
     .replace(/tunnel_[a-f0-9]{32}/g, "[tunnel-id]")
     .replace(/\bsk-[A-Za-z0-9_-]{12,}\b/g, "[runtime-key]")
+    .replace(/\/bridge\/[A-Za-z0-9_-]{40,}/g, "/bridge/[redacted]")
     .replace(/\bBearer\s+[A-Za-z0-9._~-]{20,}\b/gi, "Bearer [redacted]");
   return redacted.length > MAX_LOG_STRING_CHARS
     ? `${redacted.slice(0, MAX_LOG_STRING_CHARS)}…[truncated]`

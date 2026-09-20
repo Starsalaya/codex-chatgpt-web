@@ -237,8 +237,8 @@ test("a real HTTP peer disconnect releases a streaming turn", async () => {
     });
     const body = JSON.stringify({ query: "disconnect lifecycle proof" });
     socket.write([
-      "POST /v1/alpha/search HTTP/1.1",
-      "Host: 127.0.0.1",
+      `POST /bridge/${config.controlToken}/v1/alpha/search HTTP/1.1`,
+      `Host: 127.0.0.1:${port}`,
       "Authorization: Bearer test-codex-session",
       "Content-Type: application/json",
       `Content-Length: ${Buffer.byteLength(body)}`,
@@ -412,7 +412,7 @@ test("authenticated Interrupt hook endpoint releases the exact routed Web turn",
     }),
   });
   const endpoint = `http://127.0.0.1:${server.port}`;
-  const response = fetch(`${endpoint}/v1/responses`, {
+  const response = fetch(`${endpoint}/bridge/${config.controlToken}/v1/responses`, {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({
@@ -479,7 +479,7 @@ test("authenticated Interrupt hook endpoint also releases the exact native compa
     }),
   });
   const endpoint = `http://127.0.0.1:${server.port}`;
-  const compactResponse = fetch(`${endpoint}/v1/responses/compact`, {
+  const compactResponse = fetch(`${endpoint}/bridge/${config.controlToken}/v1/responses/compact`, {
     method: "POST",
     headers: {
       "content-type": "application/json",
@@ -976,7 +976,7 @@ test.each(["alpha/search", "images/generations"])("authenticated lifecycle contr
     }),
   });
   const endpoint = `http://127.0.0.1:${server.port}`;
-  const activeRequest = fetch(`${endpoint}/v1/${path}`, {
+  const activeRequest = fetch(`${endpoint}/bridge/${config.controlToken}/v1/${path}`, {
     method: "POST",
     headers: {
       authorization: "Bearer test-codex-session",
@@ -1097,7 +1097,7 @@ test("a drained runtime rejects new model-catalog work before shutdown", async (
     });
     expect(drain.status).toBe(200);
 
-    const models = await fetch(`${endpoint}/v1/models`);
+    const models = await fetch(`${endpoint}/bridge/${config.controlToken}/v1/models`);
     expect(models.status).toBe(503);
     expect(await models.json()).toMatchObject({
       error: {
@@ -1137,7 +1137,7 @@ test("health proves that Codex received a successful augmented model catalog", a
       last_successful_model_catalog_request_at: null,
     });
 
-    const models = await fetch(`${endpoint}/v1/models`, {
+    const models = await fetch(`${endpoint}/bridge/${config.controlToken}/v1/models`, {
       headers: { authorization: "Bearer test-codex-session" },
     });
     expect(models.status).toBe(200);
@@ -1161,7 +1161,7 @@ test("server exposes authenticated standalone Web Search on the routed v1 base U
   });
   const endpoint = `http://127.0.0.1:${server.port}`;
   try {
-    const response = await fetch(`${endpoint}/v1/alpha/search`, {
+    const response = await fetch(`${endpoint}/bridge/${config.controlToken}/v1/alpha/search`, {
       method: "POST",
       headers: {
         authorization: "Bearer test-codex-session",
@@ -1211,7 +1211,7 @@ test("standalone native image generation and edits preserve their upstream proto
       const body = operation === "generations"
         ? '{ "model": "gpt-image-1", "prompt": "A blue square", "n": 1 }'
         : '{ "model": "gpt-image-1", "prompt": "Make it green", "images": [{ "image_url": "data:image/png;base64,AAAA" }] }';
-      const response = await fetch(`${endpoint}/v1/images/${operation}?fixture=1`, {
+      const response = await fetch(`${endpoint}/bridge/${config.controlToken}/v1/images/${operation}?fixture=1`, {
         method: "POST",
         headers: {
           authorization: "Bearer test-codex-session",
@@ -1236,13 +1236,13 @@ test("standalone native image generation and edits preserve their upstream proto
       expect(await upstream.text()).toBe(body);
     }
     expect(requests).toHaveLength(2);
-    const unauthorized = await fetch(`${endpoint}/v1/images/generations`, { method: "POST", body: "{}" });
+    const unauthorized = await fetch(`${endpoint}/bridge/${config.controlToken}/v1/images/generations`, { method: "POST", body: "{}" });
     expect(unauthorized.status).toBe(401);
     expect(requests).toHaveLength(2);
     await fetch(`${endpoint}/admin/drain`, {
       method: "POST", headers: { authorization: `Bearer ${config.controlToken}` },
     });
-    const drained = await fetch(`${endpoint}/v1/images/edits`, {
+    const drained = await fetch(`${endpoint}/bridge/${config.controlToken}/v1/images/edits`, {
       method: "POST", headers: { authorization: "Bearer test-codex-session" }, body: "{}",
     });
     expect(drained.status).toBe(503);
@@ -1306,9 +1306,64 @@ test("authenticated shutdown requires a verified idle drain", async () => {
   }
 });
 
+test("provider routes require the local capability path and reject browser-origin requests before dispatch", async () => {
+  const config = { ...defaultConfig("browser-only"), port: 0 };
+  let adapterConstructions = 0;
+  let upstreamRequests = 0;
+  let upstreamAuthorization = "";
+  const server = startServer(config, {
+    adapterFactory: () => {
+      adapterConstructions += 1;
+      throw new Error("adapter must not be constructed for rejected requests");
+    },
+    fetchUpstream: async request => {
+      upstreamRequests += 1;
+      upstreamAuthorization = request.headers.get("authorization") ?? "";
+      return Response.json({ id: "native-response", output: [] });
+    },
+  });
+  const origin = `http://127.0.0.1:${server.port}`;
+  const route = `${origin}/bridge/${config.controlToken}`;
+  const json = JSON.stringify({ model: "chatgpt-web/high", input: [] });
+  try {
+    expect((await fetch(`${origin}/v1/models`)).status).toBe(404);
+    expect((await fetch(`${origin}/bridge/wrong-token/v1/models`)).status).toBe(404);
+    expect((await fetch(`${route}/v1/responses`, {
+      method: "POST",
+      headers: { "content-type": "application/json", origin: "https://attacker.example" },
+      body: json,
+    })).status).toBe(403);
+    expect((await fetch(`${route}/v1/responses`, {
+      method: "POST",
+      headers: { "content-type": "application/json", "sec-fetch-site": "cross-site" },
+      body: json,
+    })).status).toBe(403);
+    expect((await fetch(`${route}/v1/responses`, {
+      method: "POST",
+      headers: { "content-type": "text/plain" },
+      body: json,
+    })).status).toBe(415);
+    expect(adapterConstructions).toBe(0);
+    expect(upstreamRequests).toBe(0);
+
+    const nativeAuthorization = "Bearer native-codex-authorization";
+    const native = await fetch(`${route}/v1/alpha/search`, {
+      method: "POST",
+      headers: { authorization: nativeAuthorization, "content-type": "application/json" },
+      body: JSON.stringify({ query: "native authorization proof" }),
+    });
+    expect(native.status).toBe(200);
+    expect(upstreamRequests).toBe(1);
+    expect(upstreamAuthorization).toBe(nativeAuthorization);
+  } finally {
+    await server.stop(true);
+  }
+});
+
 test("model catalog health distinguishes no request, transport failure, upstream denial, and recovery without secrets", async () => {
   let outcome: "transport" | "denied" | "invalid" | "ready" = "transport";
-  const server = startServer({ ...defaultConfig("browser-only"), port: 0 }, {
+  const config = { ...defaultConfig("browser-only"), port: 0 };
+  const server = startServer(config, {
     fetchUpstream: async () => {
       if (outcome === "transport") throw Object.assign(new Error("private proxy credentials and host"), { code: "UnsupportedProxyProtocol" });
       if (outcome === "denied") return new Response("private upstream account detail", { status: 403 });
@@ -1316,8 +1371,9 @@ test("model catalog health distinguishes no request, transport failure, upstream
       return Response.json({ models: [{ slug: "native", visibility: "list", supported_reasoning_levels: [] }] });
     },
   });
-  const base = `http://127.0.0.1:${server.port}`;
-  const health = async () => await (await fetch(`${base}/healthz`)).json() as Record<string, any>;
+  const origin = `http://127.0.0.1:${server.port}`;
+  const base = `${origin}/bridge/${config.controlToken}`;
+  const health = async () => await (await fetch(`${origin}/healthz`)).json() as Record<string, any>;
   try {
     expect(await health()).toMatchObject({ model_catalog_requests: 0, last_model_catalog_result: null });
     const unauthenticated = await fetch(`${base}/v1/models`);

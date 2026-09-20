@@ -1809,7 +1809,7 @@ const server = http.createServer((request, response) => {
   if (request.url === "/healthz") {
     response.end(JSON.stringify({
       status: "ok",
-      service: "codex-chatgpt-web",
+          service: "codex-chatgpt-web-secure",
       mode: config.mode,
       version: config.releaseVersion,
       pid: process.pid,
@@ -1896,7 +1896,7 @@ const server = http.createServer((request, response) => {
   if (request.url === "/healthz") {
     response.end(JSON.stringify({
       status: "ok",
-      service: "codex-chatgpt-web",
+          service: "codex-chatgpt-web-secure",
       mode: config.mode,
       version: config.releaseVersion,
       pid: process.pid,

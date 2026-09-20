@@ -54,7 +54,7 @@ test("descriptor publishes native surface identities without inspecting renderer
     surfaceId: "h".repeat(32), view: { webContents: contents("home-target") },
     turnTabs: new Map([["automatic", automatic], ["manual", manual]]),
     getBrowserInteractionMode: () => "automatic", profile: "production", cdpPort: 40000,
-    partition: "persist:codex-web-gpt-chatgpt", control: {}, helper: {},
+    partition: "persist:codex-web-gpt-secure-chatgpt", control: {}, helper: {},
     descriptorPath: require("node:path").join(dir, "descriptor.json"),
   };
   try {
@@ -78,7 +78,7 @@ test("mode transitions publish targets before setup inspection and restore them 
     view: { webContents: { isDestroyed: () => false, getOrCreateDevToolsTargetId: () => "home-target" } },
     turnTabs: new Map(), getBrowserInteractionMode: () => savedMode,
     interactionModeOverride: null, manualOperation: null,
-    profile: "production", cdpPort: 40000, partition: "persist:codex-web-gpt-chatgpt",
+    profile: "production", cdpPort: 40000, partition: "persist:codex-web-gpt-secure-chatgpt",
     control: {}, helper: {}, descriptorPath: require("node:path").join(dir, "descriptor.json"),
     markOwnedSurface: async () => {},
   });
@@ -1167,6 +1167,35 @@ test("logout clears only the owned ChatGPT session and returns to the sign-in su
   assert.deepEqual(calls[4], ["loadURL", "https://chatgpt.com/?temporary-chat=true"]);
   assert.ok(calls.some(([name]) => name === "activateHomeSurface"));
   assert.ok(calls.some(([name]) => name === "show"));
+});
+
+test("full removal clears the owned session without automatic browser inspection", async () => {
+  const calls = [];
+  const fixture = {
+    clearOwnedSessionForPasskey: async () => calls.push("clear"),
+    setState: patch => calls.push(["state", patch]),
+    logger: { info: event => calls.push(["log", event]) },
+    snapshot: () => ({ authenticated: false, status: "signed-out" }),
+    withManualOperation: async (name, action) => {
+      calls.push(["operation", name]);
+      return await action();
+    },
+  };
+
+  const result = await BrowserHost.prototype.clearOwnedSessionForRemoval.call(fixture);
+
+  assert.deepEqual(result, { authenticated: false, status: "signed-out" });
+  assert.deepEqual(calls, [
+    ["operation", "ChatGPT session removal"],
+    "clear",
+    ["state", {
+      authenticated: false,
+      loading: false,
+      status: "signed-out",
+      message: "Sign in to ChatGPT",
+    }],
+    ["log", "browser.local_session_removed"],
+  ]);
 });
 
 test("launcher shutdown persists ChatGPT DOM storage and cookies before browser destruction", async () => {

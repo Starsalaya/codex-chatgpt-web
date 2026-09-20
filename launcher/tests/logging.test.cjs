@@ -15,10 +15,12 @@ const {
 test("launcher logs redact tunnel ids, runtime keys, and bearer credentials", () => {
   assert.deepEqual(sanitize({
     line: "tunnel_0123456789abcdef0123456789abcdef sk-exampleRuntimeSecret123",
+    route: `http://127.0.0.1:17841/bridge/${"x".repeat(43)}/v1`,
     authorization: "Bearer this-must-never-be-recorded",
     nested: { controlToken: "also-secret" },
   }), {
     line: "[tunnel-id] [runtime-key]",
+    route: "http://127.0.0.1:17841/bridge/[redacted]/v1",
     authorization: "[redacted]",
     nested: { controlToken: "[redacted]" },
   });

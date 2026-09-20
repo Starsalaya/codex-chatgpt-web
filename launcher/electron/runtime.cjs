@@ -485,8 +485,8 @@ class RuntimeHost {
       path.join(coreHome, "tunnel", "profiles", "codex-chatgpt-web-dev-zero-risk.yaml"),
     ]);
     if (snapshot.owner === "external" && this.platform === "darwin") {
-      paths.add(path.join(this.launchAgentsDir, "io.github.codex-chatgpt-web.daemon.plist"));
-      paths.add(path.join(this.launchAgentsDir, "io.github.codex-chatgpt-web.tunnel.plist"));
+      paths.add(path.join(this.launchAgentsDir, "io.github.codex-chatgpt-web-secure.daemon.plist"));
+      paths.add(path.join(this.launchAgentsDir, "io.github.codex-chatgpt-web-secure.tunnel.plist"));
     }
     const tunnels = [
       snapshot.config?.tunnel,

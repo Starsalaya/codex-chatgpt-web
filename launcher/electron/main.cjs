@@ -52,7 +52,7 @@ const BROWSER_DESCRIPTOR_PATH = path.join(CORE_HOME, "runtime", "launcher-browse
 const BROWSER_HELPER_PATH = app.isPackaged
   ? path.join(process.resourcesPath, "runtime", "app", "browser-helper.cjs")
   : path.join(SOURCE_ROOT, ".launcher-runtime", "browser-helper.cjs");
-const GITHUB_URL = "https://github.com/miuuyy/codex-chatgpt-web";
+const GITHUB_URL = "https://github.com/Starsalaya/codex-chatgpt-web";
 const X_URL = "https://x.com/miu21590";
 const CONNECTORS_URL = "https://chatgpt.com/#settings/Plugins";
 const TUNNELS_URL = "https://platform.openai.com/settings/organization/tunnels";
@@ -69,7 +69,7 @@ process.env.CODEX_CHATGPT_WEB_HOME = CORE_HOME;
 process.env.CODEX_HOME = LAUNCHER_PROFILE.codexHome;
 app.setName(LAUNCHER_PROFILE.displayName);
 if (process.platform === "win32") {
-  app.setAppUserModelId(IS_DEV_PROFILE ? "dev.codexwebgpt.launcher.dev" : "dev.codexwebgpt.launcher");
+  app.setAppUserModelId(IS_DEV_PROFILE ? "dev.codexwebgpt.secure.launcher.dev" : "dev.codexwebgpt.secure.launcher");
 }
 const launcherUserData = LAUNCHER_PROFILE.userData;
 fs.mkdirSync(launcherUserData, { recursive: true, mode: 0o700 });
@@ -223,10 +223,11 @@ const NATIVE_COPY = Object.freeze({
     quit: "Quit",
     exportDiagnostics: "Export privacy-safe diagnostics",
     cancel: "Cancel",
-    remove: "Remove",
+    disconnect: "Disconnect only",
+    removeAndErase: "Remove and erase login",
     removeTitle: "Remove Codex Web GPT",
-    removeMessage: "Remove the ChatGPT Web models from Codex and restore the previous model route?",
-    removeDetail: "The launcher's ChatGPT login profile will be preserved. Codex must be restarted once.",
+    removeMessage: "How should Codex Web GPT be removed?",
+    removeDetail: "Disconnect only restores the previous Codex route and keeps the secure launcher's ChatGPT login. Remove and erase login also clears that local browser session. Codex must be restarted once.",
     retry: "Retry",
     startupTitle: "Codex Web GPT could not start",
     startupDetail: "Retry starts the launcher again without changing your saved settings or ChatGPT profile.",
@@ -238,10 +239,11 @@ const NATIVE_COPY = Object.freeze({
     quit: "退出",
     exportDiagnostics: "导出隐私安全诊断",
     cancel: "取消",
-    remove: "移除",
+    disconnect: "仅断开连接",
+    removeAndErase: "移除并清除登录",
     removeTitle: "移除 Codex Web GPT",
-    removeMessage: "从 Codex 中移除 ChatGPT Web 模型并恢复此前的模型路由？",
-    removeDetail: "启动器中的 ChatGPT 登录 profile 会保留。Codex 需要重启一次。",
+    removeMessage: "应如何移除 Codex Web GPT？",
+    removeDetail: "仅断开连接会恢复此前的 Codex 路由并保留安全启动器中的 ChatGPT 登录。移除并清除登录还会清除该本地浏览器会话。Codex 需要重启一次。",
     retry: "重试",
     startupTitle: "Codex Web GPT 无法启动",
     startupDetail: "重试会重新启动应用，不会更改已保存的设置或 ChatGPT 登录配置。",
@@ -253,10 +255,11 @@ const NATIVE_COPY = Object.freeze({
     quit: "結束",
     exportDiagnostics: "匯出隱私安全診斷",
     cancel: "取消",
-    remove: "移除",
+    disconnect: "僅中斷連線",
+    removeAndErase: "移除並清除登入",
     removeTitle: "移除 Codex Web GPT",
-    removeMessage: "從 Codex 中移除 ChatGPT Web 模型並還原先前的模型路由？",
-    removeDetail: "啟動器中的 ChatGPT 登入設定檔會保留。Codex 需要重新啟動一次。",
+    removeMessage: "要如何移除 Codex Web GPT？",
+    removeDetail: "僅中斷連線會還原先前的 Codex 路由並保留安全啟動器中的 ChatGPT 登入。移除並清除登入也會清除該本機瀏覽器工作階段。Codex 需要重新啟動一次。",
     retry: "重試",
     startupTitle: "Codex Web GPT 無法啟動",
     startupDetail: "重試會重新啟動應用程式，不會變更已儲存的設定或 ChatGPT 登入設定檔。",
@@ -268,10 +271,11 @@ const NATIVE_COPY = Object.freeze({
     quit: "終了",
     exportDiagnostics: "プライバシー保護済みの診断情報をエクスポート",
     cancel: "キャンセル",
-    remove: "削除",
+    disconnect: "接続のみ解除",
+    removeAndErase: "削除してログインも消去",
     removeTitle: "Codex Web GPT を削除",
-    removeMessage: "Codex から ChatGPT Web モデルを削除し、以前のモデルルートを復元しますか？",
-    removeDetail: "ランチャーの ChatGPT ログインプロファイルは保持されます。Codex を一度再起動する必要があります。",
+    removeMessage: "Codex Web GPT をどのように削除しますか？",
+    removeDetail: "接続のみ解除すると以前の Codex ルートが復元され、安全なランチャーの ChatGPT ログインは保持されます。削除してログインも消去すると、そのローカルブラウザーセッションも消去されます。Codex を一度再起動する必要があります。",
     retry: "再試行",
     startupTitle: "Codex Web GPT を起動できませんでした",
     startupDetail: "保存済みの設定と ChatGPT プロファイルを変更せずに、ランチャーを再起動します。",
@@ -283,10 +287,11 @@ const NATIVE_COPY = Object.freeze({
     quit: "종료",
     exportDiagnostics: "개인정보가 보호된 진단 정보 내보내기",
     cancel: "취소",
-    remove: "제거",
+    disconnect: "연결만 해제",
+    removeAndErase: "제거하고 로그인 삭제",
     removeTitle: "Codex Web GPT 제거",
-    removeMessage: "Codex에서 ChatGPT Web 모델을 제거하고 이전 모델 경로를 복원할까요?",
-    removeDetail: "런처의 ChatGPT 로그인 프로필은 유지됩니다. Codex를 한 번 다시 시작해야 합니다.",
+    removeMessage: "Codex Web GPT를 어떻게 제거할까요?",
+    removeDetail: "연결만 해제하면 이전 Codex 경로가 복원되고 보안 런처의 ChatGPT 로그인은 유지됩니다. 제거하고 로그인 삭제를 선택하면 해당 로컬 브라우저 세션도 삭제됩니다. Codex를 한 번 다시 시작해야 합니다.",
     retry: "다시 시도",
     startupTitle: "Codex Web GPT를 시작할 수 없습니다",
     startupDetail: "저장된 설정이나 ChatGPT 프로필을 변경하지 않고 런처를 다시 시작합니다.",
@@ -454,7 +459,7 @@ function createWindow({ logger, stateStore, windowStatePath, startHidden }) {
       message: error instanceof Error ? error.message : String(error),
     });
   });
-  logger.info("launcher.window_created", { platform: process.platform, cdpPort });
+  logger.info("launcher.window_created", { platform: process.platform, browserControl: "authenticated" });
   return window;
 }
 
@@ -704,7 +709,7 @@ function registerIpc({ logger, stateStore }) {
     const copy = nativeCopyFor(stateStore.read().language);
     const confirmation = await dialog.showMessageBox(mainWindow, {
       type: "warning",
-      buttons: [copy.cancel, copy.remove],
+      buttons: [copy.cancel, copy.disconnect, copy.removeAndErase],
       defaultId: 0,
       cancelId: 0,
       title: copy.removeTitle,
@@ -712,8 +717,10 @@ function registerIpc({ logger, stateStore }) {
       detail: copy.removeDetail,
       noLink: true,
     });
-    if (confirmation.response !== 1) return { cancelled: true };
+    if (confirmation.response === 0) return { cancelled: true };
+    const erasedLogin = confirmation.response === 2;
     try {
+      if (erasedLogin) await browserHost.clearOwnedSessionForRemoval();
       await runtimeHost.uninstallIntegration();
     } finally {
       browserHost.writeDescriptor();
@@ -732,7 +739,7 @@ function registerIpc({ logger, stateStore }) {
     });
     send("launcher:state-changed", state);
     stopCatalogVerificationMonitor();
-    return { cancelled: false, state };
+    return { cancelled: false, erasedLogin, state };
   });
   handle("launcher:setup-core", async () => {
     const setupState = stateStore.read();
@@ -1007,7 +1014,7 @@ async function start() {
 
   cdpPort = await findFreePort();
   if (process.platform === "linux") {
-    app.commandLine.appendSwitch("class", IS_DEV_PROFILE ? "codex-web-gpt-dev" : "codex-web-gpt");
+    app.commandLine.appendSwitch("class", IS_DEV_PROFILE ? "codex-web-gpt-secure-dev" : "codex-web-gpt-secure");
   }
   app.commandLine.appendSwitch("remote-debugging-address", "127.0.0.1");
   app.commandLine.appendSwitch("remote-debugging-port", String(cdpPort));
@@ -1168,6 +1175,7 @@ async function start() {
     browserHost.destroy();
     await browserControl.close();
     mainWindow.destroy();
+    exitCommitted = true;
     app.quit();
     return;
   }

@@ -5,7 +5,7 @@ import type { AppConfig } from "./config";
 import { atomicWriteFile, getConfigDir } from "./config";
 import { runCommand, runChecked } from "./process";
 
-const LABEL = "io.github.codex-chatgpt-web.tunnel";
+const LABEL = "io.github.codex-chatgpt-web-secure.tunnel";
 
 export interface TunnelServiceStatus {
   supported: boolean;

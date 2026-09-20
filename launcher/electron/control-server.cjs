@@ -94,6 +94,10 @@ class BrowserControlServer {
       writeJson(response, 401, { error: "unauthorized" });
       return;
     }
+    if (request.method === "GET" && request.url === "/healthz") {
+      writeJson(response, 200, { status: "ok" });
+      return;
+    }
     const isTurn = request.url === "/v1/turn/start"
       || request.url === "/v1/turn/heartbeat"
       || request.url === "/v1/turn/end";

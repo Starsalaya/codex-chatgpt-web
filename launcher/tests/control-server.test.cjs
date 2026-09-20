@@ -3,6 +3,23 @@ const assert = require("node:assert/strict");
 const { BrowserHost } = require("../electron/browser-host.cjs");
 const { BrowserControlServer } = require("../electron/control-server.cjs");
 
+test("control health is loopback-only and requires the descriptor token", async () => {
+  const server = await new BrowserControlServer({
+    logger: { info() {}, warn() {}, error() {} },
+    getBrowserHost: () => undefined,
+    getPreferences: () => ({}),
+  }).start();
+  const { endpoint, token } = server.descriptor();
+  try {
+    assert.equal((await fetch(`${endpoint}/healthz`)).status, 401);
+    const response = await fetch(`${endpoint}/healthz`, {
+      headers: { authorization: `Bearer ${token}` },
+    });
+    assert.equal(response.status, 200);
+    assert.deepEqual(await response.json(), { status: "ok" });
+  } finally { await server.close(); }
+});
+
 test("native proxy resolution requires owner auth, restricts targets, and works without browser automation", async () => {
   const resolved = [];
   const server = await new BrowserControlServer({

@@ -5,9 +5,9 @@ editing Codex configuration, or opening a new issue.
 
 ## The first five minutes
 
-1. Install the [latest release](https://github.com/miuuyy/codex-chatgpt-web/releases/latest). Quit
-   **Codex Web GPT** before running the installer again; updating preserves its private ChatGPT
-   profile and launcher configuration.
+1. Build the pinned secure fork source as described in [Get started](README.md#get-started). Quit
+   **Codex Web GPT Secure** before running the locally built installer again; updating preserves its
+   private ChatGPT profile and launcher configuration. Remote launcher updates are disabled.
 2. In the launcher, confirm that ChatGPT sign-in, the browser smoke test, and **Install models** (or
    **Repair Codex setup**) are green.
 3. Fully quit Codex, including its background process, and reopen it. Signing out, closing only the

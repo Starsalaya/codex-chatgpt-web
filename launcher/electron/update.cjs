@@ -6,10 +6,11 @@ const path = require("node:path");
 const { spawn, spawnSync } = require("node:child_process");
 const { pipeline } = require("node:stream/promises");
 
-const REPOSITORY = "miuuyy/codex-chatgpt-web";
+const REPOSITORY = "Starsalaya/codex-chatgpt-web";
 const RELEASE_API_URL = `https://api.github.com/repos/${REPOSITORY}/releases/latest`;
 const USER_AGENT = "codex-web-gpt-launcher-updater";
 const MAX_REDIRECTS = 5;
+const REMOTE_UPDATES_ENABLED = false;
 
 function parseVersion(value) {
   const match = /^(\d+)\.(\d+)\.(\d+)(?:-([0-9A-Za-z.-]+))?$/.exec(String(value || "").trim());
@@ -43,13 +44,13 @@ function releaseVersion(tagName) {
 
 function releaseAssetName(version, platform = process.platform, arch = process.arch) {
   if (platform === "darwin" && ["arm64", "x64"].includes(arch)) {
-    return `codex-web-gpt-${version}-mac-${arch}.zip`;
+    return `codex-web-gpt-secure-${version}-mac-${arch}.zip`;
   }
   if (platform === "win32" && arch === "x64") {
-    return `codex-web-gpt-${version}-win-x64.exe`;
+    return `codex-web-gpt-secure-${version}-win-x64.exe`;
   }
   if (platform === "linux" && arch === "x64") {
-    return `codex-web-gpt-${version}-linux-x64.AppImage`;
+    return `codex-web-gpt-secure-${version}-linux-x64.AppImage`;
   }
   return null;
 }
@@ -150,7 +151,7 @@ function findMacApplication(root) {
   const appEntry = entries.find((entry) => entry.isDirectory() && entry.name.endsWith(".app"));
   if (!appEntry) throw new Error("The macOS update archive does not contain an application bundle");
   const application = path.join(root, appEntry.name);
-  const executable = path.join(application, "Contents", "MacOS", "Codex Web GPT");
+  const executable = path.join(application, "Contents", "MacOS", "Codex Web GPT Secure");
   if (!fs.existsSync(executable) || !fs.statSync(executable).isFile()) {
     throw new Error("The macOS update archive is incomplete");
   }
@@ -255,10 +256,11 @@ function createUpdateController({
   publish,
   logger,
   dependencies = {},
+  enabled = REMOTE_UPDATES_ENABLED,
 }) {
   const deps = { ...defaultDependencies(), ...dependencies };
   const supportedAsset = releaseAssetName(currentVersion, platform, arch);
-  let state = packaged && supportedAsset ? { status: "idle" } : { status: "disabled" };
+  let state = enabled && packaged && supportedAsset ? { status: "idle" } : { status: "disabled" };
   let checked = false;
   let pending = null;
   let candidate = null;
@@ -374,6 +376,7 @@ function createUpdateController({
 }
 
 module.exports = {
+  REMOTE_UPDATES_ENABLED,
   buildJob,
   compareVersions,
   createUpdateController,

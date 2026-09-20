@@ -539,7 +539,9 @@ async function uninstallCommand(args: string[]): Promise<void> {
   if (config && process.platform === "darwin" && !launcherRuntimeStopped) await uninstallService(config);
   uninstallCodexIntegration();
   if (!keepData) rmSync(getConfigDir(), { recursive: true, force: true });
-  stdout.write(keepData ? "Uninstalled; private application data was preserved.\n" : "Uninstalled and removed private application data.\n");
+  stdout.write(keepData
+    ? "Uninstalled; bridge data and the launcher browser profile were preserved.\n"
+    : "Uninstalled and removed bridge data. The launcher browser profile is removed only by the launcher's erase-login option.\n");
 }
 
 async function main(): Promise<void> {

@@ -311,7 +311,7 @@ class BrowserHost {
     helper,
     logger,
     loginWithPasskey,
-    partition = "persist:codex-web-gpt-chatgpt",
+    partition = "persist:codex-web-gpt-secure-chatgpt",
     profile = "production",
     publishState,
     showWindow = () => {},
@@ -337,8 +337,8 @@ class BrowserHost {
       throw new Error("Browser host profile is invalid");
     }
     const expectedPartition = profile === "development"
-      ? "persist:codex-web-gpt-dev-chatgpt"
-      : "persist:codex-web-gpt-chatgpt";
+      ? "persist:codex-web-gpt-secure-dev-chatgpt"
+      : "persist:codex-web-gpt-secure-chatgpt";
     if (partition !== expectedPartition) throw new Error("Browser host partition does not match its profile");
     this.partition = partition;
     this.profile = profile;
@@ -2492,6 +2492,20 @@ class BrowserHost {
     browserSession.flushStorageData();
     await browserSession.cookies.flushStore();
     for (const tab of tabs) this.removeTurnTab(tab, false);
+  }
+
+  async clearOwnedSessionForRemoval() {
+    return await this.withManualOperation("ChatGPT session removal", async () => {
+      await this.clearOwnedSessionForPasskey();
+      this.setState({
+        authenticated: false,
+        loading: false,
+        status: "signed-out",
+        message: "Sign in to ChatGPT",
+      });
+      this.logger.info("browser.local_session_removed");
+      return this.snapshot();
+    });
   }
 
   async resetFailedPasskeyLogin() {

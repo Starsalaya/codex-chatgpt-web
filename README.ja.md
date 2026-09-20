@@ -2,15 +2,7 @@
   <img src="assets/readme/hero.svg" width="960" alt="Web モデルに切り替えても、Codex はそのまま。ChatGPT のプラン。いつものワークフロー。モデルの力を最大限に。">
 </p>
 
-<p align="center">
-  <a href="https://github.com/miuuyy/codex-chatgpt-web/releases/download/v5.0.8/codex-web-gpt-5.0.8-win-x64.exe"><img src="assets/readme/download-windows.svg" width="224" height="64" alt="Windows · x64"></a>&nbsp;
-  <a href="https://github.com/miuuyy/codex-chatgpt-web/releases/download/v5.0.8/codex-web-gpt-5.0.8-mac-arm64.dmg"><img src="assets/readme/download-macos.svg" width="224" height="64" alt="macOS · Apple silicon"></a>&nbsp;
-  <a href="https://github.com/miuuyy/codex-chatgpt-web/releases/download/v5.0.8/codex-web-gpt-5.0.8-linux-x64.AppImage"><img src="assets/readme/download-linux.svg" width="224" height="64" alt="Linux · x64"></a>
-</p>
-
-<p align="center">
-  <a href="https://github.com/miuuyy/codex-chatgpt-web/releases/download/v5.0.8/codex-web-gpt-5.0.8-mac-x64.dmg">macOS Intel</a> · <a href="https://github.com/miuuyy/codex-chatgpt-web/releases/latest">すべてのリリース</a>
-</p>
+> セキュリティフォーク：上流のビルド済みダウンロードは提供しません。固定されたソースから分離ランチャーをローカルでビルドし、検証してください。
 
 <p align="center">
   <a href="README.md">English</a> · <a href="README.zh-CN.md">简体中文</a> · <a href="README.ja.md">日本語</a> · <a href="README.ko.md">한국어</a>
@@ -21,7 +13,7 @@
 </p>
 
 <p align="center">
-  <a href="#get-started">使い始める</a> · <a href="https://github.com/miuuyy/codex-chatgpt-web/releases">更新内容</a> · <a href="docs/architecture.md">アーキテクチャ</a> · <a href="TROUBLESHOOTING.md">トラブルシューティング</a>
+  <a href="#get-started">使い始める</a> · <a href="https://github.com/Starsalaya/codex-chatgpt-web">セキュアフォーク</a> · <a href="docs/architecture.md">アーキテクチャ</a> · <a href="TROUBLESHOOTING.md">トラブルシューティング</a>
 </p>
 
 アカウントで利用可能な Pro を含む ChatGPT Web モデルを、Codex のネイティブモデル選択画面から使えます。ChatGPT Web の独立した利用枠を使うため、Work や Codex の利用枠は消費しません。UI、タスク、画像、ストリーミングはそのままです。
@@ -34,7 +26,7 @@ Full ハーネスモードでは、MCP を通じて ChatGPT を現在のタス�
 
 **利用可能なモデル：** Free/Go → **Luna / Think**。推論コントロールがあるアカウント → **Instant～High** に加え、利用可能な場合に **Extra High** と **Pro**。ランチャーがアカウントの利用可能なモデルを検出します。
 
-1. **ランチャーをインストール**：上のボタンから、お使いの OS 向けのアプリをダウンロードします。
+1. **ランチャーをビルドしてインストール**：下記のローカル手順で固定ソースからビルドします。
 2. **ChatGPT にサインイン**：内蔵ブラウザーでログインし、ブラウザーのスモークテストを実行します。
 3. **モデルをインストール**：Codex を一度再起動し、**ChatGPT Web — …** モデルを選択します。
 4. **ツールを使って開発する場合**：ランチャーの **MCP** を開き、下記の Full ハーネス設定を完了します。
@@ -44,18 +36,26 @@ Full ハーネスモードでは、MCP を通じて ChatGPT を現在のタス�
 <details>
 <summary><strong>ターミナルからのインストール・更新・修復</strong></summary>
 
-更新前にランチャーを終了してください。以下のインストーラーは OS とアーキテクチャを選択し、公開チェックサムを検証します。ChatGPT プロファイルとランチャー設定は保持されます。
+Bun 1.4.0 を使用し、レビュー済みソースからローカルでビルドしてください。このフォークではリモート更新が無効です。
 
 **macOS / Linux**
 
 ```bash
-curl -fsSL https://github.com/miuuyy/codex-chatgpt-web/releases/latest/download/install-launcher.sh | sh
+git clone https://github.com/Starsalaya/codex-chatgpt-web.git
+cd codex-chatgpt-web
+bun install --frozen-lockfile
+bun install --cwd launcher --frozen-lockfile
+bun run app:package
 ```
 
 **Windows PowerShell**
 
 ```powershell
-irm https://github.com/miuuyy/codex-chatgpt-web/releases/latest/download/install-launcher.ps1 | iex
+git clone https://github.com/Starsalaya/codex-chatgpt-web.git
+Set-Location codex-chatgpt-web
+bun install --frozen-lockfile
+bun install --cwd launcher --frozen-lockfile
+bun run app:package
 ```
 
 </details>
@@ -165,7 +165,7 @@ Full モードを有効にする前に、完全な[アーキテクチャ](docs/a
 <a id="development"></a>
 
 ```bash
-git clone https://github.com/miuuyy/codex-chatgpt-web.git && \
+git clone https://github.com/Starsalaya/codex-chatgpt-web.git && \
 cd codex-chatgpt-web && \
 bun run app
 ```
@@ -182,7 +182,7 @@ bun run smoke:subagents
 bun run app:package
 ```
 
-`dev:launcher` は `~/.codex-chatgpt-web-dev` 内の独立したプロファイルとアカウントを使います。`dev:chat` は実際のブラウザーとコンパクション処理を使い、ツールの結果は明示的にシミュレーションします。通常の Codex のルートは変更しません。設定とコマンドは [DEV chat ハーネス](docs/dev-chat.md)を参照してください。
+`dev:launcher` は `~/.codex-chatgpt-web-secure-dev` 内の独立したプロファイルとアカウントを使います。`dev:chat` は実際のブラウザーとコンパクション処理を使い、ツールの結果は明示的にシミュレーションします。通常の Codex のルートは変更しません。設定とコマンドは [DEV chat ハーネス](docs/dev-chat.md)を参照してください。
 
 </details>
 

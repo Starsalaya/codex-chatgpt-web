@@ -32,7 +32,7 @@ afterEach(() => {
 function descriptorFile(
   controlEndpoint = "http://127.0.0.1:39111",
   profile: "production" | "development" = "production",
-  endpoint = "http://127.0.0.1:39110",
+  endpoint: string | null = "http://127.0.0.1:39110",
 ): string {
   const root = mkdtempSync(join(tmpdir(), "codex-launcher-descriptor-"));
   roots.push(root);
@@ -42,7 +42,7 @@ function descriptorFile(
     kind: LAUNCHER_BROWSER_HOST_KIND,
     profile,
     pid: process.pid,
-    endpoint,
+    ...(endpoint === null ? {} : { endpoint }),
     control: {
       endpoint: controlEndpoint,
       token: "launcher-control-token-0123456789abcdefghijklmnop",
@@ -52,11 +52,13 @@ function descriptorFile(
       script: import.meta.path,
     },
     partition: profile === "development"
-      ? "persist:codex-web-gpt-dev-chatgpt"
-      : "persist:codex-web-gpt-chatgpt",
+    ? "persist:codex-web-gpt-secure-dev-chatgpt"
+      : "persist:codex-web-gpt-secure-chatgpt",
     idleUrl: LAUNCHER_BROWSER_IDLE_URL,
     surfaceId: "launcher_surface_id_0123456789AB",
-    surfaceTargets: { ["launcher_surface_id_0123456789AB"]: "native-owned-target" },
+    surfaceTargets: endpoint === null
+      ? {}
+      : { ["launcher_surface_id_0123456789AB"]: "native-owned-target" },
     createdAt: new Date().toISOString(),
   })}\n`, { mode: 0o600 });
   return path;
@@ -311,6 +313,32 @@ test("launcher liveness verification checks only owned process and loopback CDP 
   }
 });
 
+test("manual launcher liveness uses authenticated control health without a CDP endpoint", async () => {
+  let expectedAuthorization = "";
+  const server = createServer((request, response) => {
+    expect(request.url).toBe("/healthz");
+    expect(request.headers.authorization).toBe(expectedAuthorization);
+    response.writeHead(200, { "content-type": "application/json" });
+    response.end('{"status":"ok"}\n');
+  });
+  await new Promise<void>((resolve, reject) => {
+    server.once("error", reject);
+    server.listen(0, "127.0.0.1", resolve);
+  });
+  try {
+    const address = server.address();
+    if (!address || typeof address === "string") throw new Error("test server has no port");
+    const path = descriptorFile(`http://127.0.0.1:${address.port}`, "production", null);
+    const saved = JSON.parse(readFileSync(path, "utf8")) as { control: { token: string } };
+    expectedAuthorization = `Bearer ${saved.control.token}`;
+    await expect(inspectLauncherBrowserHostLiveness(path, { expectedProfile: "production" }))
+      .resolves.toMatchObject({ profile: "production", surfaceTargets: {} });
+    expect(readLauncherBrowserHostDescriptor(path).endpoint).toBeUndefined();
+  } finally {
+    await new Promise<void>(resolveClose => server.close(() => resolveClose()));
+  }
+});
+
 test("launcher session verification reports its own deadline instead of a generic abort", async () => {
   const server = createServer(async (request, response) => {
     for await (const _chunk of request) { /* consume request */ }
@@ -347,7 +375,7 @@ test("launcher profile checks reject cross-profile browser ownership", async () 
   const path = descriptorFile("http://127.0.0.1:39111", "development");
   expect(readLauncherBrowserHostDescriptor(path)).toMatchObject({
     profile: "development",
-    partition: "persist:codex-web-gpt-dev-chatgpt",
+      partition: "persist:codex-web-gpt-secure-dev-chatgpt",
   });
   await expect(inspectLauncherBrowserHost(path, { expectedProfile: "production", timeoutMs: 5 }))
     .rejects.toThrow("belongs to development");
